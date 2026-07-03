@@ -100,6 +100,12 @@ class PersonnelParser
 
             // Nur hinzufügen, wenn die Pflicht-ID gefunden wurde
             if (isset($personData['ingame_id'])) {
+                // Prüfen, ob es sich um einen Disponenten handelt (PH 5.3.1.1)
+                if (isset($personData['job_title']) && str_contains(strtolower($personData['job_title']), 'disponent')) {
+                    $personData['type'] = 'dispatcher'; // Markierung für Disponenten
+                } else {
+                    $personData['type'] = 'driver'; // Standardmäßig Fahrer
+                }
                 $personnel[] = $personData;
             }
         }
@@ -126,5 +132,51 @@ class PersonnelParser
     {
         $parts = explode(':', $text);
         return isset($parts[1]) ? trim($parts[1]) : '';
+    }
+       /**
+     * Speichert die geparsten Personen (Fahrer oder Disponenten) in die Datenbank.
+     * Standardmäßig werden sie als NICHT eingestellt (is_employed = false) gespeichert,
+     * da es sich um Bewerbungen handelt.
+     *
+     * @param PDO $pdo Die PDO-Datenbankverbindung
+     * @return void
+     * @throws Exception Bei Fehlern beim Speichern
+     */
+    public function saveToDatabase(PDO $pdo): void
+    {
+        $driverRepo = new DriverRepository($pdo);
+        $dispatcherRepo = new DispatcherRepository($pdo);
+
+        foreach ($this->parse($this->html) as $person) {
+            if ($person['type'] === 'dispatcher') {
+                // Disponenten speichern (als Bewerbung, nicht eingestellt)
+                $dispatcher = new Dispatcher(
+                    $person['ingame_id'],
+                    $person['first_name'],
+                    $person['last_name'],
+                    $person['age'],
+                    $person['skill_val'] ?? 0,
+                    $person['reliability_val'] ?? 0,
+                    $person['salary'] ?? 0.0,
+                    false // is_employed = false (Bewerbung, nicht eingestellt)
+                );
+                $dispatcherRepo->save($dispatcher);
+            } else {
+                // Fahrer speichern (als Bewerbung, nicht eingestellt)
+                $driver = new Driver(
+                    $person['ingame_id'],
+                    $person['first_name'],
+                    $person['last_name'],
+                    $person['age'],
+                    $person['skill_val'] ?? 0,
+                    $person['reliability_val'] ?? 0,
+                    $person['adr_permit'] ?? false,
+                    $person['penalty_points'] ?? 0,
+                    $person['salary'] ?? 0.0,
+                    false // is_employed = false (Bewerbung, nicht eingestellt)
+                );
+                $driverRepo->save($driver);
+            }
+        }
     }
 }

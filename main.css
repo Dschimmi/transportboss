@@ -95,3 +95,68 @@ body {
     border-radius: 3px;
     box-sizing: border-box;
 }
+    
+/* Spezifisches UI-Styling für diese Ansicht */
+.form-box {
+    background-color: #252525;
+    padding: 20px;
+    border-radius: 5px;
+    border: 1px solid #444;
+    box-sizing: border-box;
+    margin-bottom: 30px;
+}
+.input-group {
+    margin-bottom: 12px;
+}
+.input-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.85em;
+    color: #aaa;
+    font-weight: 600;
+}
+.input-group input {
+    width: 100%;
+    padding: 10px;
+    background: #1e1e1e;
+    color: #fff;
+    border: 1px solid #444;
+    box-sizing: border-box;
+    border-radius: 3px;
+}
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+.data-table th, .data-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #444;
+}
+.data-table th {
+    background-color: #1e1e1e;
+    color: #f39c12;
+    cursor: pointer;
+}
+.data-table tr:hover {
+    background-color: #2a2a2a;
+}
+.status-employed {
+    color: #2ecc71;
+    font-weight: bold;
+}
+.status-unemployed {
+    color: #e74c3c;
+    font-style: italic;
+}
+.filter-input {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 20px;
+    background: #1e1e1e;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 3px;
+}
+    
