@@ -58,4 +58,14 @@ class DriverRepository
             'adr_update'         => (int)$driver->hasAdrPermit()
         ]);
     }
+    /**
+     * Lädt alle aktuell eingestellten Fahrer.
+     * 
+     * @return array Assoziatives Array aller aktiven Fahrer
+     */
+    public function getAllEmployed(): array
+    {
+        $stmt = $this->pdo->query("SELECT * FROM drivers WHERE is_employed = 1");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }

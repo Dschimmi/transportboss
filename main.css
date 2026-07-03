@@ -61,3 +61,37 @@ body {
     color: #e74c3c; 
     border-left: 5px solid #e74c3c; 
 }
+/* --- Tabellen- & Filter-Styling (orders_view.php) --- */
+.data-table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    margin-top: 20px; 
+}
+.data-table th, .data-table td { 
+    padding: 10px; 
+    text-align: left; 
+    border-bottom: 1px solid #444; 
+}
+.data-table th { 
+    background-color: #252525; 
+    cursor: pointer; /* Zeigt an, dass die Spalten klickbar sind */
+    user-select: none; /* Verhindert Textmarkierung beim Doppelklick */
+}
+.data-table th:hover { 
+    background-color: #333; 
+}
+.adr-badge { 
+    color: #e74c3c; 
+    font-weight: bold; 
+    margin-right: 5px; 
+}
+.filter-input {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 15px;
+    background-color: #252525;
+    color: #ffffff;
+    border: 1px solid #444;
+    border-radius: 3px;
+    box-sizing: border-box;
+}

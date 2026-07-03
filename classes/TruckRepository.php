@@ -61,4 +61,33 @@ class TruckRepository
             'stau_update'  => (int)$truck->hasTuningStau()
         ]);
     }
+    /**
+     * Lädt alle im Besitz befindlichen LKWs.
+     * 
+     * @return array Assoziatives Array aller eigenen LKWs
+     */
+    public function getAllOwned(): array
+    {
+        $stmt = $this->pdo->query("SELECT * FROM trucks");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Verknüpft einen LKW mit einer Fahrer-ID (oder hebt die Zuweisung auf, wenn null).
+     * 
+     * @param string $truckIngameId Die Ingame-ID des LKWs
+     * @param string|null $driverIngameId Die Ingame-ID des Fahrers (oder null zum Entkoppeln)
+     */
+    public function assignDriver(string $truckIngameId, ?string $driverIngameId): void
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE trucks 
+            SET assigned_driver_id = :driver_id 
+            WHERE ingame_vehicle_id = :truck_id
+        ");
+        $stmt->execute([
+            'driver_id' => $driverIngameId,
+            'truck_id'  => $truckIngameId
+        ]);
+    }
 }
