@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+
+<head>
+<title>StellenMarkt</title>
+<link rel="stylesheet" href="/css/all.css" type="text/css">
+<script type="text/javascript" src="/js/jquery-1.5.1.min.js"></script>
+<script>
+
+function showpg(nr)
+{
+	$('.nppage').hide();
+	$('#'+nr).show();
+}
+function selectemp(nr)
+{
+	$('#selectedEmployee').val(nr);
+}
+</script>
+</head>
+
+<body bgcolor="white" class="body">
+
+<form name="StellenMarktForm" method="post" action="/pages/StellenMarkt.shtml">
+
+
+
+<div id="screen">  
+
+	<div id="leftcol">
+		<div id="gamemenu">
+			
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+var baseminutes = 30
+var hours = 0;
+var minutes = 9+baseminutes;
+var seconds = 3;
+function updateScreen(){
+	
+	seconds+=3;
+	
+	if(seconds>=60){
+		seconds-=60;
+		minutes++;
+	}
+	if(minutes>=60){
+		minutes-=60;
+		hours++;
+	}
+	if(hours>=24){
+		hours-=24;
+		//add day
+	}
+
+	timestring=(hours<10?"0"+hours:hours)+":"+(minutes<10?"0"+minutes:minutes)+":"+(seconds<10?"0"+seconds:seconds);
+	
+	document.getElementById("digitaltime").innerHTML=timestring;
+	window.setTimeout("updateScreen()",1000);
+}
+</script>
+
+<div class="digitalclock">
+	<div class="digitalad">personal digital clockPRO</div>
+	<div class="digitalweekday">-Di.-</div>
+	<div class="digitaldate">08.05.2018</div>
+	<!-- <div class="digitaltime">00:30:00</div> -->
+	<div class="digitaltime" id="digitaltime">--:--:--</div>
+	<div class="digitaltick"></div>
+</div>
+
+
+
+<div class="buerolink">
+	<a class="menulink menulinkhover" href="/pages/Buero.shtml" title="zum B&uuml;ro"><img src="../images/menu/link-buero.jpg"></a><br/>
+	<a class="menulink" href="/pages/Buero.shtml">Buero</a><br/>
+</div>
+
+<div class="buerolink">
+	<a class="menulink menulinkhover" href="/pages/Disponent.shtml" title="zum Disponent"><img style="background-color:#ffffff" src="../images/menu/icon_disponent.jpg"></a><br/>
+	<a class="menulink" href="/pages/Disponent.shtml">Disponent</a><br/>
+</div>
+
+<div class="buerolink">
+	<a class="menulink menulinkhover" href="/pages/Auftraege.shtml" title="zum Auftragspool"><img style="background-color:#ffffff" src="../images/menu/icon_auftragspool.jpg"></a><br/>
+	<a class="menulink" href="/pages/Auftraege.shtml">Auftragspool</a><br/>
+</div>
+
+<div class="spedipda">
+	<div>
+		<div class="insidepda">
+			<a class="menulink" href="/pages/Fuhrpark.shtml" title="zum Fuhrpark">
+			<div class="spedipdascreen">
+				<div class="pdamaintopic">LKWs</div>
+				<div class="pdatopic">Zentrale: <span class="pdacontent"> 0</span></div>
+				<div class="pdatopic">Unterwegs: <span class="pdacontent"> 3</span></div>
+				<div class="pdatopic">Parkplatz: <span class="pdacontent"> 0</span></div>
+				<div style="clear:both;"></div>
+			</div>
+			</a>
+		</div>
+	</div>
+	<div>
+		<a class="menulink" href="/pages/Fuhrpark.shtml">Fuhrpark</a><br/>
+	</div>
+</div>
+
+<div class="buerolink">
+	<div>
+		<div style="float: left;width:50px;padding-left: 20px;">
+			<a class="menulink" href="/pages/ModForumView.shtml" title="Forum"><img src="../images/menu/mail.png"></a><br/>
+			<a class="menulink" href="/pages/ModForumView.shtml">Forum</a><br/>
+		</div>
+		<div style="float: left;width:50px;padding-left: 0px;">
+			<a class="menulink" href="/pages/Mails.shtml" title="Nachrichtenzentrale"><img src="../images/menu/mail.png"></a><br/>
+			<a class="menulink" href="/pages/Mails.shtml">Mails</a><br/>
+		</div>
+		<div style="clear:both;"></div>
+	</div>
+</div>
+
+<br/>
+<div class="buerolink">
+	<a class="menulink" target="_blank" href="/browsergame/transportspiel-hilfe.jsp">
+		<img style="vertical-align: middle;" src="../images/menu/icon_help.png">
+		Spielhilfe
+	</a>
+</div>
+<br>
+
+<div class="buerolink">
+	<a class="menulink" href="/login/BasicLogin.shtml?baction=logout">
+		<img style="vertical-align: middle;" src="../images/menu/icon_logout.jpg">
+		Log out
+	</a>
+</div>
+<br>
+
+<script>
+ window.setTimeout("updateScreen()");
+</script>
+
+		</div>
+	</div><!-- end div leftcol -->
+
+	<div id="centercol">
+	
+		<div id="toplogo">
+			
+
+
+ 
+ 
+ 
+
+
+
+
+
+
+
+
+
+<div class="toplogo">
+
+	<div class="logoimg">
+		<img src="/images/logooben.png" alt="TransportBoss Logo">
+	</div>
+
+	<div>
+		<div class="companyname">
+			Dschimmi Transporte (Einzelunternehmer)
+		</div>
+		<div class="tinytext standort">
+			Firmensitz: Freiburg
+		</div>
+	</div>
+	
+	
+	
+	<div class="financialstats normaltext">
+		
+		<div>
+			<div class="headerfinance">Kontostand: <span class="haben">17,245.74</span></div>
+			<div class="headerfinance">monatl.Fixkosten: <span class="haben">10,649.00</span></div>
+			<div class="headerfinance">Monatseinnahmen: <span class="haben">45,651.14</span></div>
+			<div class="headerfinance">Monatsbilanz: <span class="haben">35,002.14</span></div>
+			<div class="headerfinance" title="Transport Coins">TraCs: <span style="color:#6666cc">0</span></div>
+			<div class="headeracccount"><a href="/pages/AccountSettings.shtml">Account Optionen</a><br/></div>
+			<div style="clear:both;"></div>
+		</div>
+	</div>
+</div>
+
+		</div>
+
+		<div id="optionalbanner">
+		</div>
+
+		<div id="sysmessages" class="sysmessages">
+			
+
+			
+		</div>
+	
+		<div id="content" class="stellenmarkt">
+
+			<div class="zeitunginhalt">
+				<input type="hidden" name="selectedEmployee" id="selectedEmployee" value="0">
+				
+						
+							<div class="nppage" id="page-1" style="text-align:center;display:block">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-5')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">1/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px">  </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Disponent</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Zacharias</span></div>
+																<div>Nachname : <span class="bold">Sauer</span></div>
+																<div>Alter : 51</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_disponent_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Verwaltung: <span class="bold">67</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">96</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1152</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10658638)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Disponent sucht Top - Firma.<br>
+																
+																	Ich traue mir zu, bis zu <span class="bold">6</span> Auftr&auml;ge zu betreuen.
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Sylvio</span></div>
+																<div>Nachname : <span class="bold">Schmettmann</span></div>
+																<div>Alter : 50</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">74</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">84</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">1373</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10658917)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																Fahrer sucht anst&auml;ndige Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Olli</span></div>
+																<div>Nachname : <span class="bold">Brauer</span></div>
+																<div>Alter : 19</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">66</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">79</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">722</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10659116)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Fahrer sucht anst&auml;ndige Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Kurt</span></div>
+																<div>Nachname : <span class="bold">Lutzke</span></div>
+																<div>Alter : 32</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">64</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1224</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10659330)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Spitzen-
+																B&uuml;rokraft sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-5" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-9')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">2/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-1')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Peter</span></div>
+																<div>Nachname : <span class="bold">Ballmann</span></div>
+																<div>Alter : 47</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">33</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">53</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">801</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10659331)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																Fahrer sucht faire  Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Tankwart</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Julian</span></div>
+																<div>Nachname : <span class="bold">Lutzke</span></div>
+																<div>Alter : 39</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_tank_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">81</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1098</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10659332)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																Tankwart sucht anst&auml;ndige Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Steve</span></div>
+																<div>Nachname : <span class="bold">Keller</span></div>
+																<div>Alter : 19</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">52</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">71</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">773</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10646616)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Kfz-Techniker sucht anst&auml;ndige Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Thomas</span></div>
+																<div>Nachname : <span class="bold">Roller</span></div>
+																<div>Alter : 54</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">77</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">49</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">976</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10650453)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																Fahrer sucht eine  Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-9" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-13')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">3/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-5')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Tankwart</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Theo</span></div>
+																<div>Nachname : <span class="bold">Becker</span></div>
+																<div>Alter : 53</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_tank_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">41</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">698</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10496597)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Tankwart sucht eine  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Ulf</span></div>
+																<div>Nachname : <span class="bold">Kluppke</span></div>
+																<div>Alter : 29</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">73</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">61</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1008</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10616521)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																Kfz-Techniker sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Werner</span></div>
+																<div>Nachname : <span class="bold">Sauer</span></div>
+																<div>Alter : 21</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">75</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">54</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">620</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10597366)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																Kfz-Techniker sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Peter</span></div>
+																<div>Nachname : <span class="bold">Krause</span></div>
+																<div>Alter : 63</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">95</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">87</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1098</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10647032)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Spitzen-
+																Kfz-Techniker sucht anst&auml;ndige Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-13" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-17')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">4/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-9')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Bert</span></div>
+																<div>Nachname : <span class="bold">Schmidt</span></div>
+																<div>Alter : 34</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">99</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">44</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">827</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10650454)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Spitzen-
+																Kfz-Techniker sucht eine  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Monika</span></div>
+																<div>Nachname : <span class="bold">Rauh</span></div>
+																<div>Alter : 33</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">57</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">885</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10650455)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																B&uuml;rokraft sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Piet</span></div>
+																<div>Nachname : <span class="bold">Kuntze</span></div>
+																<div>Alter : 64</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">46</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1028</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10348047)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																B&uuml;rokraft sucht eine  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Thomas</span></div>
+																<div>Nachname : <span class="bold">Franke</span></div>
+																<div>Alter : 61</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">43</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">52</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">645</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10437056)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																Kfz-Techniker sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-17" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-21')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">5/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-13')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Disponent</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Isabell</span></div>
+																<div>Nachname : <span class="bold">Wagner</span></div>
+																<div>Alter : 27</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_disponent_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Verwaltung: <span class="bold">48</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">45</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">498</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10650052)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																Disponent sucht eine  Firma.<br>
+																
+																	Ich traue mir zu, bis zu <span class="bold">4</span> Auftr&auml;ge zu betreuen.
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Lisa</span></div>
+																<div>Nachname : <span class="bold">Wagner</span></div>
+																<div>Alter : 45</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">61</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">881</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10193021)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																B&uuml;rokraft sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Heinz</span></div>
+																<div>Nachname : <span class="bold">Bach</span></div>
+																<div>Alter : 42</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">72</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">64</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">1308</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10624132)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																Fahrer sucht faire  Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Olli</span></div>
+																<div>Nachname : <span class="bold">Ballmann</span></div>
+																<div>Alter : 34</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">75</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">918</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10649412)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																B&uuml;rokraft sucht anst&auml;ndige Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-21" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-25')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">6/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-17')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Kfz-Techniker</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Ulf</span></div>
+																<div>Nachname : <span class="bold">Franke</span></div>
+																<div>Alter : 46</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_technik_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Kfz.Mech.: <span class="bold">62</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">54</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1285</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10199244)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Kfz-Techniker sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Peter</span></div>
+																<div>Nachname : <span class="bold">Rauh</span></div>
+																<div>Alter : 26</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">43</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">44</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">719</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10581082)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																Fahrer sucht eine  Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Piet</span></div>
+																<div>Nachname : <span class="bold">Fischer</span></div>
+																<div>Alter : 55</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">40</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">58</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">918</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10624133)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																Fahrer sucht faire  Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Beate</span></div>
+																<div>Nachname : <span class="bold">Hasler</span></div>
+																<div>Alter : 50</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">61</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">786</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10172624)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																B&uuml;rokraft sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-25" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-29')">&gt;</a>&nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">7/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-21')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Fahrer</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Gerd</span></div>
+																<div>Nachname : <span class="bold">Brauer</span></div>
+																<div>Alter : 20</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_fahrer_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		Fahrk&ouml;nnen: <span class="bold">62</span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">46</span></div>
+																<div>Gefahrguterlaubnis:0</div>
+																<div>Punkte in der Kartei:0</div>
+																<div>Gehaltswunsch : <span class="bold">773</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10651987)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Fahrer sucht eine  Firma.<br>
+																
+																	Gefahrgutschein habe ich keinen, w&uuml;rde aber gerne eine Schulung machen. <br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Manuela</span></div>
+																<div>Nachname : <span class="bold">Keller</span></div>
+																<div>Alter : 29</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">78</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1112</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10225829)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																B&uuml;rokraft sucht anst&auml;ndige Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Carmen</span></div>
+																<div>Nachname : <span class="bold">Roller</span></div>
+																<div>Alter : 47</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">91</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">1189</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10437462)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Spitzen-
+																B&uuml;rokraft sucht Top - Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Tankwart</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Arne</span></div>
+																<div>Nachname : <span class="bold">Naumann</span></div>
+																<div>Alter : 20</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_tank_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">61</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">781</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10462123)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Guter 
+																Tankwart sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+											<div style="clear:both;"></div>
+										</div>
+									
+				
+						
+							<div class="nppage" id="page-29" style="text-align:center;display:none">
+						
+									
+										
+										<div style="padding:0 40px 4px 0;">
+											<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Stellengesuche</span></div>
+											<div style="float:right;width:25px;line-height:32px"> &nbsp;</div>
+											<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">8/8 </span></div>
+											<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-25')">&lt;</a> </div>
+											<div style="clear:both;"></div>
+										</div>
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">Tankwart</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Thomas</span></div>
+																<div>Nachname : <span class="bold">Rauh</span></div>
+																<div>Alter : 29</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_tank_m.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">51</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">767</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10199758)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Erfahrener 
+																Tankwart sucht faire  Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+						
+									
+			
+				
+										<div class="humanresources">
+											<div class="title">
+												Stellengesuch:
+												<span class="header">B&uuml;rokraft</span><br>
+											</div>
+											<div class="humanstats">
+												<table >
+													<tr>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>Vorname : <span class="bold">Anna</span></div>
+																<div>Nachname : <span class="bold">Lutzke</span></div>
+																<div>Alter : 56</div>
+																<div><br></div>
+																<div class="center"><img src="../images/personal_buero_w.jpg" style="height:45px"></div>
+															</div>
+														</td>
+														<td style="vertical-align:top">
+															<div class="" style="">
+																<div>
+																	
+																		<span></span>
+																	
+																</div>
+																<div>Zuverl&auml;ssigkeit : <span class="bold">86</span></div>
+																<div><br></div>
+																<div><br></div>
+																<div>Gehaltswunsch : <span class="bold">838</span></div>
+																<div>
+																	<input type="submit" onclick="selectemp(10513348)" value="Einstellen" name="baction">
+																</div>
+															</div>
+														</td>
+													</tr>
+													<tr>
+														<td colspan="2" style="vertical-align:top" class="bewerbungstext">
+															<div>
+	                                                            Neueinsteiger als Speditions-
+																B&uuml;rokraft sucht anst&auml;ndige Firma.<br>
+																
+																Stehe sofort zur Verf&uuml;gung, bitte rufen Sie mich an.
+															</div>
+														</td>
+													</tr>
+												</table>
+											</div>
+										</div><!--  end fahrzeugoffer -->
+									
+				
+				
+					<div style="clear:both;"></div>
+					</div>
+				
+				<div class="backtotitle">
+					<div class="left"><a href="/pages/Zeitung.shtml">Zur&uuml;ck zur Titelseite</a></div>
+					<div class="right"><a href="/pages/Buero.shtml">Zeitung weglegen und weiterarbeiten</a></div>
+					<div style="clear:both;"></div>	
+				</div>
+
+			</div><!--  end div zeitungsinhalt -->
+		</div><!-- end div content -->
+		
+		<div id="footer">
+			<div class="footer">
+	<a class="impresslink" href="/">Home</a> - 
+	<a class="impresslink" href="/pages/impressum.jsp">Impressum</a> - 
+
+	<a class="impresslink" href="http://policy.gamedragon.de/web-transportboss.jsp" target="ds">Datenschutz</a> -
+	<a class="impresslink" href="/agb.jsp">Nutzungsbedingungen</a> - 
+	<a class="impresslink" href="http://www.gamedragon.de">www.gamedragon.de</a>
+</div>
+
+		</div>
+	</div><!-- end div centercol -->
+	
+	<div id="rightcol">
+	</div><!-- end div rightcol -->
+	
+	<div style="clear: both;"></div>
+	
+</div><!-- end divscreen -->
+ 
+
+<script>
+var gaId = "UA-7577954-15";
+var disableGa = "ga-disable-"+gaId;
+if(document.cookie.indexOf("optoutactive=true")>-1){window[disableGa]=true;}
+</script>
+<script type="text/javascript">
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-7577954-15']);
+  _gaq.push (['_gat._anonymizeIp']);
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+</script>
+
+
+
+</form>
+</body>
+
+</html>
