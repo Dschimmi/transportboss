@@ -50,6 +50,11 @@ class TopologyEngine
             ORDER BY o.from_city_id = :current_city DESC, o.revenue / (o.weight_total * o.distance_km) DESC
         ");
 
+        $params = $relevantCityIds;
+        $params['current_city'] = $currentCityId;
+        $orderStmt->execute($params);
+        $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
+
         $orderStmt->execute(array_merge($relevantCityIds, ['current_city' => $currentCityId]));
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -122,17 +127,17 @@ class TopologyEngine
     private function getNearestCities(int $cityId, int $limit): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT city_b_id AS city_id, distance_km
+            (SELECT city_b_id AS city_id, distance_km
             FROM distances
-            WHERE city_a_id = :city_id
+            WHERE city_a_id = :city_id)
             UNION ALL
-            SELECT city_a_id AS city_id, distance_km
+            (SELECT city_a_id AS city_id, distance_km
             FROM distances
-            WHERE city_b_id = :city_id
+            WHERE city_b_id = :city_id)
             ORDER BY distance_km ASC
-            LIMIT :limit
+            LIMIT $limit
         ");
-        $stmt->execute(['city_id' => $cityId, 'limit' => $limit]);
+        $stmt->execute(['city_id' => $cityId]);
         return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'city_id');
     }
 

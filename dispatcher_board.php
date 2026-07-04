@@ -26,6 +26,15 @@ if (isset($_GET['focus_truck_id'])) {
     $focusTruckId = $firstTruck ? (int)$firstTruck['id'] : null;
 }
 
+// Entladen-Aktion (Kaskaden-Storno)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'unload_job') {
+    $orderId = (int)$_POST['order_id'];
+    $orderRepo->unassignFromTruck($orderId);
+    // Aktuelle Seite neu laden, um Änderungen anzuzeigen
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
 // Alle disponiblen Fahrzeuge laden
 $allTrucks = $truckRepo->getAllOwned();
 
@@ -160,9 +169,56 @@ if ($focusTruckId) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr>
-                                        <td colspan="6" style="text-align: center; color: #888;">Tourenplan wird hier angezeigt</td>
-                                    </tr>
+                                    <?php
+                                    // Eingeplante Aufträge für dieses Fahrzeug laden
+                                    $assignedOrders = $pdo->query("
+                                        SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+                                        FROM orders o
+                                        JOIN cities c1 ON o.from_city_id = c1.id
+                                        JOIN cities c2 ON o.to_city_id = c2.id
+                                        WHERE o.assigned_truck_id = {$truck['id']}
+                                        AND o.is_archived = 0
+                                        ORDER BY o.assigned_at ASC
+                                    ")->fetchAll(PDO::FETCH_ASSOC);
+
+                                    if (empty($assignedOrders)) {
+                                        echo '<tr><td colspan="6" style="text-align: center; color: #888;">Keine Tour geplant</td></tr>';
+                                    } else {
+                                        $currentCityId = $truck['current_city_id'];
+                                        foreach ($assignedOrders as $index => $order) {
+                                            // Prüfen, ob eine Leerfahrt nötig ist (Standort-Diskrepanz)
+                                            if ($index === 0 && $order['from_city_id'] != $currentCityId) {
+                                                $distance = $distanceService->getDistance($currentCityId, $order['from_city_id']);
+                                                echo '<tr class="row-type-empty">
+                                                    <td>LEERFAHRT</td>
+                                                    <td>' . htmlspecialchars($pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn()) . ' → ' . htmlspecialchars($order['from_city_name']) . '</td>
+                                                    <td>' . $distance . ' km</td>
+                                                    <td>-</td>
+                                                    <td>0,00 €</td>
+                                                    <td>-</td>
+                                                </tr>';
+                                                $currentCityId = $order['from_city_id'];
+                                            }
+
+                                            // JOB-Etappe
+                                            echo '<tr class="row-type-cargo">
+                                                <td>JOB</td>
+                                                <td>' . htmlspecialchars($order['from_city_name']) . ' → ' . htmlspecialchars($order['to_city_name']) . '</td>
+                                                <td>' . $order['distance_km'] . ' km</td>
+                                                <td>' . $order['weight_total'] . ' t</td>
+                                                <td>' . number_format($order['revenue'], 2, ',', '.') . ' €</td>
+                                                <td>
+                                                    <form method="post" onsubmit="return confirm(\'Auftrag wirklich entladen?\')">
+                                                        <input type="hidden" name="action" value="unload_job">
+                                                        <input type="hidden" name="order_id" value="' . $order['id'] . '">
+                                                        <button type="submit" class="btn-primary" style="background-color: #e74c3c;">Entladen</button>
+                                                    </form>
+                                                </td>
+                                            </tr>';
+                                            $currentCityId = $order['to_city_id'];
+                                        }
+                                    }
+                                    ?>
                                 </tbody>
                             </table>
                         </div>
@@ -202,7 +258,7 @@ if ($focusTruckId) {
                                                 <?= $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE' ?>
                                             </td>
                                             <td>
-                                                <form method="post" action="load_job.php" style="display: inline;">
+                                                <form method="post" action="load_job.php">
                                                     <input type="hidden" name="truck_id" value="<?= $truck['id'] ?>">
                                                     <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
                                                     <button type="submit" class="btn-primary">Laden</button>
@@ -226,7 +282,7 @@ if ($focusTruckId) {
         </div>
     </div>
 
-    <!-- JavaScript für Filter, Sortierung, Tourenplan -->
+    <!-- JavaScript für Filter, Tourenplan ein-/ausklappen -->
     <script>
         // Sidebar-Filter
         document.getElementById('cityFilter').addEventListener('keyup', function() {
@@ -238,7 +294,7 @@ if ($focusTruckId) {
             });
         });
 
-        // Tourenplan ein-/ausklappen
+        // Tourenplan ein-/ausklappen (global)
         document.getElementById('toggleAllTours').addEventListener('click', function() {
             const containers = document.querySelectorAll('.tour-plan-container');
             const isCollapsed = this.textContent.includes('einklappen');
@@ -246,6 +302,17 @@ if ($focusTruckId) {
                 container.style.display = isCollapsed ? 'none' : 'block';
             });
             this.textContent = isCollapsed ? 'Alle Touren ausklappen' : 'Alle Touren einklappen';
+        });
+
+        // Tourenplan ein-/ausklappen (individuell pro Fahrzeug)
+        document.querySelectorAll('.truck-card').forEach(card => {
+            card.addEventListener('click', function(e) {
+                // Verhindere, dass Klicks auf Buttons/Links den Fokus-Wechsel auslösen
+                if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A' || e.target.closest('form')) {
+                    return;
+                }
+                // Fokus-Wechsel (bereits durch href im div gehandhabt)
+            });
         });
     </script>
 </body>
