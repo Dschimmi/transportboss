@@ -24,20 +24,20 @@ class Order
         private ?DateTime $assignedAt = null
     ) {}
 
-    // Getter (Auszug für die wichtigsten Operationen)
+    // Getter für alle Eigenschaften
     public function getIngameOrderId(): ?string { return $this->ingameOrderId; }
     public function getFingerprint(): string { return $this->fingerprint; }
-    public function isAdr(): bool { return $this->isAdr; }
-    public function getRevenue(): float { return $this->revenue; }
     public function getFreightType(): string { return $this->freightType; }
     public function getCommodity(): string { return $this->commodity; }
+    public function isAdr(): bool { return $this->isAdr; }
     public function getWeightTotal(): int { return $this->weightTotal; }
     public function getWeightRemaining(): int { return $this->weightRemaining; }
+    public function getRevenue(): float { return $this->revenue; }
     public function getFromCityId(): int { return $this->fromCityId; }
     public function getToCityId(): int { return $this->toCityId; }
     public function isAccepted(): bool { return $this->isAccepted; }
     public function isArchived(): bool { return $this->isArchived; }
+    public function getId(): ?int { return $this->id; }
     public function getAssignedTruckId(): ?int { return $this->assignedTruckId; }
     public function getAssignedAt(): ?DateTime { return $this->assignedAt; }
-    // ... weitere Getter nach Bedarf
 }

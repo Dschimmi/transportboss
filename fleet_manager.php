@@ -169,7 +169,8 @@ foreach ($allDrivers as $driver) {
     </style>
 </head>
 <body>
-    <div class="main-container" style="max-width: 1200px;">
+    <?php require_once 'nav.php'; ?>
+    <div class="fluid-container">
         <h1 class="accent-text">Fuhrpark & Personal Manager</h1>
         
         <?php if ($message): ?>
@@ -221,7 +222,7 @@ foreach ($allDrivers as $driver) {
                         <label for="adr_permit">Gefahrgutschein (ADR) vorhanden</label>
                     </div>
                     
-                    <button type="submit" class="btn-primary" style="width:100%">Fahrer speichern</button>
+                    <button type="submit" class="btn-primary w-100">Fahrer speichern</button>
                 </form>
             </div>
 
@@ -275,25 +276,24 @@ foreach ($allDrivers as $driver) {
                         <input type="number" name="km_stand" required>
                     </div>
                     
-                    <button type="submit" class="btn-primary" style="width:100%">LKW speichern</button>
+                    <button type="submit" class="btn-primary w-100">LKW speichern</button>
                 </form>
             </div>
         </div>
 
-        <hr style="border-color: #444; margin: 30px 0;">
+        <hr class="section-divider">
 
         <!-- Disposition (Zuweisungen) -->
         <h2 class="accent-text">Fahrer-Zuweisung (Disposition)</h2>
         
         <!-- Filter-Eingabefeld zur Tabellensuche -->
         <input type="text" id="tableFilter" class="filter-input" placeholder="Tabelle durchsuchen (z.B. Name, LKW-Typ, ID)...">
-
+        
         <table class="data-table" id="sortableTable">
             <thead>
                 <tr>
-                    <!-- Klick-Events für die Sortierung hinzugefügt -->
-                    <th onclick="sortTable(0, 'string')">LKW Daten ↕</th>
-                    <th onclick="sortTable(1, 'string')">Fahrer Daten ↕</th>
+                    <th onclick="sortTable(0, 'string')">LKW Daten ⇕</th>
+                    <th onclick="sortTable(1, 'string')">Fahrer Daten ⇕</th>
                     <th>Aktion</th>
                 </tr>
             </thead>
@@ -301,68 +301,76 @@ foreach ($allDrivers as $driver) {
                 
                 <!-- 1. Unzugewiesene LKWs (Fehlende Fahrer) -->
                 <?php foreach ($unassignedTrucks as $truck): ?>
-                <tr>
-                    <td>
-                        <strong>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?></strong><br>
-                        <?= htmlspecialchars($truck['vehicle_type']) ?> | <?= $truck['capacity_t'] ?> t
-                    </td>
-                    <td class="text-warning">- Kein Fahrer zugewiesen -</td>
-                    <td>
-                        <form method="post" style="display:flex; gap:10px; align-items:center;">
-                            <input type="hidden" name="action" value="assign_pair">
-                            <input type="hidden" name="truck_id" value="<?= htmlspecialchars($truck['ingame_vehicle_id']) ?>">
-                            <select name="driver_id" class="inline-select" required>
-                                <option value="">-- Freien Fahrer wählen --</option>
-                                <?php foreach ($unassignedDrivers as $ud): ?>
-                                    <option value="<?= htmlspecialchars((string)$ud['ingame_driver_id']) ?>">
-                                        <?= htmlspecialchars($ud['first_name'] . ' ' . $ud['last_name']) ?> (Können: <?= $ud['skill_val'] ?>, ADR: <?= $ud['adr_permit'] ? 'Ja' : 'Nein' ?>)
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <button type="submit" class="btn-primary" style="padding: 8px 12px;">Zuweisen</button>
-                        </form>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
+                    <tr>
+                        <td>
+                            <a href="edit_entity.php?type=truck&id=<?= $truck['id'] ?>" style="color: #3498db; text-decoration: none;">
+                                <strong>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?></strong>
+                            </a><br>
+                            <?= htmlspecialchars($truck['vehicle_type']) ?> | <?= $truck['capacity_t'] ?> t
+                        </td>
+                        <td class="text-warning">- Kein Fahrer zugewiesen -</td>
+                        <td>
+                            <form method="post" class="action-form">
+                                <input type="hidden" name="action" value="assign_pair">
+                                <input type="hidden" name="truck_id" value="<?= htmlspecialchars((string)$truck['ingame_vehicle_id']) ?>">
+                                <select name="driver_id" class="inline-select" required>
+                                    <option value="">-- Freien Fahrer wählen --</option>
+                                    <?php foreach ($unassignedDrivers as $ud): ?>
+                                        <option value="<?= htmlspecialchars((string)$ud['id']) ?>">
+                                            <?= htmlspecialchars($ud['first_name'] . ' ' . $ud['last_name']) ?> (Können: <?= $ud['skill_val'] ?>, ADR: <?= $ud['adr_permit'] ? 'Ja' : 'Nein' ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" class="btn-primary btn-small">Zuweisen</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
 
                 <!-- 2. Unzugewiesene Fahrer (Fehlende LKWs) -->
                 <?php foreach ($unassignedDrivers as $driver): ?>
-                <tr>
-                    <td class="text-warning">- Kein LKW zugewiesen -</td>
-                    <td>
-                        <strong><?= htmlspecialchars($driver['first_name'] . ' ' . $driver['last_name']) ?></strong><br>
-                        Fahrkönnen: <?= $driver['skill_val'] ?> | ADR: <?= $driver['adr_permit'] ? 'Ja' : 'Nein' ?>
-                    </td>
-                    <td>
-                        <form method="post" style="display:flex; gap:10px; align-items:center;">
-                            <input type="hidden" name="action" value="assign_pair">
-                            <input type="hidden" name="driver_id" value="<?= htmlspecialchars((string)$driver['ingame_driver_id']) ?>">
-                            <select name="truck_id" class="inline-select" required>
-                                <option value="">-- Freien LKW wählen --</option>
-                                <?php foreach ($unassignedTrucks as $ut): ?>
-                                    <option value="<?= htmlspecialchars($ut['ingame_vehicle_id']) ?>">
-                                        ID: <?= htmlspecialchars($ut['ingame_vehicle_id']) ?> (<?= htmlspecialchars($ut['vehicle_type']) ?>, <?= $ut['capacity_t'] ?>t)
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <button type="submit" class="btn-primary" style="padding: 8px 12px;">Zuweisen</button>
-                        </form>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
+                    <tr>
+                        <td class="text-warning">- Kein LKW zugewiesen -</td>
+                        <td>
+                            <a href="edit_entity.php?type=driver&id=<?= $driver['id'] ?>" style="color: #3498db; text-decoration: none;">
+                                <strong><?= htmlspecialchars($driver['first_name'] . ' ' . $driver['last_name']) ?></strong>
+                            </a><br>
+                            Fahrkönnen: <?= $driver['skill_val'] ?> | ADR: <?= $driver['adr_permit'] ? 'Ja' : 'Nein' ?>
+                        </td>
+                        <td>
+                            <form method="post" class="action-form">
+                                <input type="hidden" name="action" value="assign_pair">
+                                <input type="hidden" name="driver_id" value="<?= htmlspecialchars((string)$driver['ingame_driver_id']) ?>">
+                                    <select name="truck_id" class="inline-select" required>
+                                        <option value="">-- Freien LKW wählen --</option>
+                                        <?php foreach ($unassignedTrucks as $ut): ?>
+                                            <option value="<?= htmlspecialchars((string)$ut['ingame_vehicle_id']) ?>">
+                                                ID: <?= htmlspecialchars($ut['ingame_vehicle_id']) ?> ...
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <button type="submit" class="btn-primary btn-small">Zuweisen</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
 
                 <!-- 3. Komplett zugewiesene Gespanne -->
                 <?php foreach ($assignedPairs as $truck): 
                     $d = $driverMap[$truck['assigned_driver_id']] ?? null;
                 ?>
                 <tr>
-                    <td style="color: #ccc;">
-                        <strong>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?></strong><br>
+                    <td class="text-gray">
+                        <a href="edit_entity.php?type=truck&id=<?= $truck['id'] ?>" style="color: #3498db; text-decoration: none;">
+                            <strong>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?></strong>
+                        </a><br>
                         <?= htmlspecialchars($truck['vehicle_type']) ?> | <?= $truck['capacity_t'] ?> t
                     </td>
-                    <td style="color: #ccc;">
+                    <td class="text-gray">
                         <?php if ($d): ?>
-                            <strong><?= htmlspecialchars($d['first_name'] . ' ' . $d['last_name']) ?></strong><br>
+                            <a href="edit_entity.php?type=driver&id=<?= $d['id'] ?>" style="color: #3498db; text-decoration: none;">
+                                <strong><?= htmlspecialchars($d['first_name'] . ' ' . $d['last_name']) ?></strong>
+                            </a><br>
                             Fahrkönnen: <?= $d['skill_val'] ?> | ADR: <?= $d['adr_permit'] ? 'Ja' : 'Nein' ?>
                         <?php else: ?>
                             Fahrer-Daten fehlen
@@ -371,13 +379,12 @@ foreach ($allDrivers as $driver) {
                     <td>
                         <form method="post">
                             <input type="hidden" name="action" value="unassign_pair">
-                            <input type="hidden" name="truck_id" value="<?= htmlspecialchars($truck['ingame_vehicle_id']) ?>">
-                            <button type="submit" class="btn-primary" style="padding: 8px 12px; background-color: #e74c3c; color: white; border: none;">Entkoppeln</button>
+                            <input type="hidden" name="truck_id" value="<?= htmlspecialchars((string)$truck['ingame_vehicle_id']) ?>">
+                            <button type="submit" class="btn-primary btn-small btn-danger">Entkoppeln</button>
                         </form>
                     </td>
                 </tr>
                 <?php endforeach; ?>
-
             </tbody>
         </table>
     </div>

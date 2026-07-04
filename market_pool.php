@@ -72,16 +72,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
     <!-- Zentrales Styling (PH 1.3.2.2)[cite: 3] -->
     <link rel="stylesheet" href="main.css">
 </head>
+<!-- Zu ersetzender Block in market_pool.php -->
 <body>
-    <!-- Oberflächen-Farbe Ebene 1 (PH 1.4.1.2)[cite: 3] -->
-    <div class="main-container">
-        <!-- Akzentfarbe Orange (PH 1.4.1.3)[cite: 3] -->
+    <?php require_once 'nav.php'; ?>
+    <div class="fluid-container" style="max-width: 1000px; margin: 0 auto;"> <!-- Breite leicht erhöht für die Tabelle -->
         <h1 class="accent-text">Auftragspool Import (Frachtbörse)</h1>
         
         <?php if ($message): ?>
             <div class="feedback-msg <?= $messageClass ?>"><?= $message ?></div>
+            
+            <!-- Dynamische Tabelle zur Kontrolle der geparsten Daten -->
+            <?php if (!empty($parsedOrders) && $messageClass === 'status-success'): ?>
+                <div style="margin-bottom: 20px; overflow-x: auto;">
+                    <h3 class="accent-text" style="font-size: 1em; margin-bottom: 10px;">Kontrolle: Geparste Auftragsdaten</h3>
+                    <table class="data-table" style="font-size: 0.85em; white-space: nowrap;">
+                        <thead>
+                            <tr>
+                                <?php 
+                                // Spaltenköpfe dynamisch aus dem ersten Element generieren (Objekt oder Array)
+                                $firstItem = $parsedOrders[0];
+                                $isObject = is_object($firstItem);
+                                $props = $isObject ? (new ReflectionClass($firstItem))->getProperties() : array_keys($firstItem);
+                                
+                                foreach ($props as $prop) {
+                                    $name = $isObject ? $prop->getName() : $prop;
+                                    echo '<th>' . htmlspecialchars($name) . '</th>';
+                                }
+                                ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($parsedOrders as $item): ?>
+                                <tr>
+                                    <?php 
+                                    // Zeilen dynamisch auslesen
+                                    foreach ($props as $prop) {
+                                        if ($isObject) {
+                                            $prop->setAccessible(true); // Zugriff auf private Eigenschaften erlauben
+                                            $val = $prop->getValue($item);
+                                        } else {
+                                            $val = $item[$prop];
+                                        }
+                                        
+                                        if (is_bool($val)) $val = $val ? 'Ja' : 'Nein';
+                                        echo '<td>' . htmlspecialchars((string)$val) . '</td>';
+                                    }
+                                    ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
         <?php endif; ?>
-
+        
         <form method="post" action="market_pool.php">
             <label for="import_data">Rohtext aus dem Auftragspool (Kopierte Tabelle) einfügen:</label><br>
             <textarea id="import_data" name="import_data" class="import-textarea" required></textarea><br>

@@ -159,4 +159,315 @@ body {
     border: 1px solid #444;
     border-radius: 3px;
 }
-    
+/* --- Top-Navigation --- */
+.top-nav {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background-color: #1e1e1e;
+    border-bottom: 2px solid #f39c12;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.nav-brand {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #f39c12;
+    text-decoration: none;
+}
+
+.nav-links {
+    display: flex;
+    gap: 15px;
+}
+
+.nav-links a {
+    color: #ffffff;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+}
+
+.nav-links a:hover {
+    background-color: #333333;
+    color: #f39c12;
+}
+/* --- Dispatcher Board Layout --- */
+.fluid-container {
+    background-color: #1e1e1e;
+    padding: 20px;
+    border-radius: 5px;
+    max-width: 100%; /* Bricht die 800px-Grenze auf */
+    box-sizing: border-box;
+}
+
+.board-layout {
+    display: flex;
+    height: calc(100vh - 120px); /* 120px Abzug für Top-Nav und Header */
+    gap: 15px;
+}
+
+.board-sidebar {
+    width: 350px;
+    background-color: #1e1e1e;
+    border-right: 1px solid #444;
+    overflow-y: auto;
+    padding-right: 15px;
+}
+
+.board-main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 15px 15px 15px; /* Sorgt für den sauberen Abstand zum rechten Bildschirmrand und nach unten */
+}
+
+.board-controls {
+    margin-bottom: 15px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.truck-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* --- Fahrzeugkarten --- */
+.truck-card {
+    background-color: #252525;
+    border: 1px solid #444;
+    border-radius: 5px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.truck-card-inactive {
+    opacity: 0.6;
+}
+
+.truck-card-active {
+    border-left: 5px solid #27ae60;
+}
+
+.truck-card-focussed {
+    border-color: #f39c12;
+    box-shadow: 0 0 8px rgba(243, 156, 18, 0.3);
+}
+
+/* --- Fahrzeugkarten Details --- */
+.card-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.card-header-right {
+    text-align: right;
+}
+
+.card-tour-end {
+    margin-top: 10px;
+    font-size: 0.9em;
+}
+
+.text-orange { color: #f39c12; font-weight: bold; }
+.text-white { color: #ffffff; }
+.text-gray { color: #aaaaaa; }
+.text-blue { color: #3498db; }
+.text-center { text-align: center; }
+.text-muted-italic { color: #888888; font-style: italic; }
+
+.tour-plan-container {
+    margin-top: 15px;
+    display: none;
+}
+
+.suggestion-table {
+    width: 100%; /* Zieht die Tabelle über die gesamte Kartenbreite */
+    border-collapse: collapse;
+}
+
+.suggestion-table th, .suggestion-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #444;
+}
+
+.suggestion-table th {
+    color: #f39c12;
+    font-weight: 600;
+}
+
+.suggestions-wrapper {
+    margin-top: 15px;
+    border-top: 1px solid #444;
+    padding-top: 10px;
+}
+
+.empty-suggestions {
+    margin-top: 15px;
+    color: #888;
+    font-style: italic;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+/* --- Dashboard (index.php) --- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.dashboard-card {
+    background-color: #252525;
+    padding: 20px;
+    border-radius: 5px;
+    border: 1px solid #444;
+    text-align: center;
+}
+
+.dashboard-card h3 {
+    margin-top: 0;
+}
+
+.kpi-value {
+    font-size: 2.5em;
+    font-weight: bold;
+    color: #ffffff;
+    margin: 10px 0;
+}
+
+.kpi-desc {
+    color: #aaaaaa;
+    font-size: 0.9em;
+}
+
+.section-divider {
+    border: none;
+    border-top: 1px solid #444;
+    margin: 30px 0;
+}
+
+.module-link {
+    display: block;
+    margin-top: 15px;
+    padding: 10px;
+    background-color: #1e1e1e;
+    color: #ffffff;
+    text-decoration: none;
+    border-radius: 3px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.module-link:hover {
+    background-color: #333333;
+    color: #f39c12;
+}
+/* --- Formulare & Eingaben --- */
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.form-box {
+    background-color: #252525;
+    padding: 20px;
+    border-radius: 5px;
+    border: 1px solid #444;
+    box-sizing: border-box;
+}
+
+.input-group {
+    margin-bottom: 12px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.85em;
+    color: #aaaaaa;
+    font-weight: 600;
+}
+
+.input-group input, 
+.input-group select {
+    width: 100%;
+    padding: 10px;
+    background: #1e1e1e;
+    color: #ffffff;
+    border: 1px solid #444;
+    box-sizing: border-box;
+    border-radius: 3px;
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 20px 0;
+}
+
+.checkbox-group input {
+    margin: 0;
+    width: 18px;
+    height: 18px;
+}
+
+.checkbox-group label {
+    margin: 0;
+    font-size: 0.9em;
+    color: #ffffff;
+}
+
+/* --- Inline-Aktionen & Hilfsklassen --- */
+.action-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.inline-select {
+    padding: 8px;
+    background: #1e1e1e;
+    color: #ffffff;
+    border: 1px solid #444;
+    border-radius: 3px;
+}
+
+.w-100 { 
+    width: 100%; 
+}
+.btn-small { 
+    padding: 8px 12px; 
+}
+.text-warning { 
+    color: #e74c3c; font-weight: bold; 
+}
+.d-inline-block {
+    display: inline-block;
+    margin: 0;
+}

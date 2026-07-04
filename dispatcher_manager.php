@@ -54,9 +54,10 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
     <link rel="stylesheet" href="main.css">
 </head>
 <body>
-    <div class="main-container" style="max-width: 1000px;">
+    <?php require_once 'nav.php'; ?>
+    <div class="fluid-container">
         <h1 class="accent-text">Disponenten Manager</h1>
-
+        
         <?php if ($message): ?>
             <div class="feedback-msg <?= $messageClass ?>"><?= $message ?></div>
         <?php endif; ?>
@@ -66,7 +67,7 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
             <h3 class="accent-text">Disponenten manuell erfassen</h3>
             <form method="post">
                 <input type="hidden" name="action" value="add_dispatcher">
-
+                
                 <div class="input-group">
                     <label>Ingame ID (z.B. 10658917)</label>
                     <input type="text" name="ingame_id" required>
@@ -95,26 +96,26 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
                     <label>Gehalt (€)</label>
                     <input type="number" name="salary" step="0.01" required>
                 </div>
-
-                <button type="submit" class="btn-primary" style="width:100%">Disponent einstellen</button>
+                
+                <button type="submit" class="btn-primary w-100">Disponent einstellen</button>
             </form>
         </div>
 
-        <hr style="border-color: #444; margin: 30px 0;">
+        <hr class="section-divider">
 
         <!-- Filter-Eingabefeld -->
         <input type="text" id="dispatcherFilter" class="filter-input" placeholder="Disponenten durchsuchen (Name, ID, Skill)...">
-
+        
         <!-- Tabelle: Alle Disponenten -->
         <table class="data-table" id="dispatcherTable">
             <thead>
                 <tr>
-                    <th onclick="sortTable(0)">ID ⇅</th>
-                    <th onclick="sortTable(1)">Name ⇅</th>
-                    <th onclick="sortTable(2)">Alter ⇅</th>
-                    <th onclick="sortTable(3)">Skill ⇅</th>
-                    <th onclick="sortTable(4)">Zuverlässigkeit ⇅</th>
-                    <th onclick="sortTable(5)">Gehalt ⇅</th>
+                    <th onclick="sortTable(0)">ID ⇕</th>
+                    <th onclick="sortTable(1)">Name ⇕</th>
+                    <th onclick="sortTable(2)">Alter ⇕</th>
+                    <th onclick="sortTable(3)">Skill ⇕</th>
+                    <th onclick="sortTable(4)">Zuverlässigkeit ⇕</th>
+                    <th onclick="sortTable(5)">Gehalt ⇕</th>
                     <th>Status</th>
                     <th>Aktion</th>
                 </tr>
@@ -133,13 +134,13 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
                     </td>
                     <td>
                         <?php if ($dispatcher['is_employed']): ?>
-                            <form method="post" style="display: inline;">
+                            <form method="post" class="d-inline-block">
                                 <input type="hidden" name="action" value="dismiss_dispatcher">
                                 <input type="hidden" name="dispatcher_id" value="<?= $dispatcher['id'] ?>">
-                                <button type="submit" class="btn-primary" style="background-color: #e74c3c; padding: 6px 12px;">Entlassen</button>
+                                <button type="submit" class="btn-primary btn-danger btn-small">Entlassen</button>
                             </form>
                         <?php else: ?>
-                            <span style="color: #888; font-size: 0.8em;">(Bewerbung)</span>
+                            <span class="text-muted-italic">(Bewerbung)</span>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -154,7 +155,7 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
         document.getElementById('dispatcherFilter').addEventListener('keyup', function() {
             let filter = this.value.toLowerCase();
             let rows = document.querySelectorAll('#dispatcherTable tbody tr');
-
+            
             rows.forEach(row => {
                 let text = row.textContent.toLowerCase();
                 row.style.display = text.includes(filter) ? '' : 'none';
@@ -162,13 +163,13 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
         });
 
         // Sortier-Logik
-        let sortDirections = [false, false, false, false, false, false, false, false];
+        let sortDirections = [false, false, false, false, false, false, false, false]; 
 
         function sortTable(columnIndex) {
             let table = document.getElementById("dispatcherTable");
             let tbody = table.querySelector("tbody");
             let rows = Array.from(tbody.querySelectorAll("tr"));
-
+            
             let dir = !sortDirections[columnIndex];
             sortDirections[columnIndex] = dir;
 
@@ -184,6 +185,9 @@ $allDispatchers = $pdo->query("SELECT * FROM dispatchers ORDER BY is_employed DE
                 }
 
                 // String-Sortierung für andere Spalten
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+
                 if (valA < valB) return dir ? -1 : 1;
                 if (valA > valB) return dir ? 1 : -1;
                 return 0;

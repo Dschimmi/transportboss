@@ -47,16 +47,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
     <!-- Zentrales Styling -->
     <link rel="stylesheet" href="main.css">
 </head>
+<!-- Zu ersetzender Block in market_vehicles.php -->
 <body>
-    <!-- Oberflächen-Farbe Ebene 1 -->
-    <div class="main-container">
-        <!-- Akzentfarbe Orange -->
+    <?php require_once 'nav.php'; ?>
+    <div class="fluid-container" style="max-width: 1000px; margin: 0 auto;">
         <h1 class="accent-text">Fahrzeughandel Import</h1>
         
         <?php if ($message): ?>
             <div class="feedback-msg <?= $messageClass ?>"><?= $message ?></div>
+            
+            <!-- Dynamische Tabelle zur Kontrolle der geparsten Daten -->
+            <?php if (!empty($parsedVehicles) && $messageClass === 'status-success'): ?>
+                <div style="margin-bottom: 20px; overflow-x: auto;">
+                    <h3 class="accent-text" style="font-size: 1em; margin-bottom: 10px;">Kontrolle: Geparste Fahrzeugdaten</h3>
+                    <table class="data-table" style="font-size: 0.85em; white-space: nowrap;">
+                        <thead>
+                            <tr>
+                                <?php 
+                                // Spaltenköpfe dynamisch aus dem ersten Element generieren (Objekt oder Array)
+                                $firstItem = $parsedVehicles[0];
+                                $isObject = is_object($firstItem);
+                                $props = $isObject ? (new ReflectionClass($firstItem))->getProperties() : array_keys($firstItem);
+                                
+                                foreach ($props as $prop) {
+                                    $name = $isObject ? $prop->getName() : $prop;
+                                    echo '<th>' . htmlspecialchars($name) . '</th>';
+                                }
+                                ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($parsedVehicles as $item): ?>
+                                <tr>
+                                    <?php 
+                                    // Zeilen dynamisch auslesen
+                                    foreach ($props as $prop) {
+                                        if ($isObject) {
+                                            $prop->setAccessible(true); // Zugriff auf private Eigenschaften erlauben
+                                            $val = $prop->getValue($item);
+                                        } else {
+                                            $val = $item[$prop];
+                                        }
+                                        
+                                        if (is_bool($val)) $val = $val ? 'Ja' : 'Nein';
+                                        echo '<td>' . htmlspecialchars((string)$val) . '</td>';
+                                    }
+                                    ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
         <?php endif; ?>
-
+        
         <form method="post" action="market_vehicles.php">
             <label for="import_data">HTML-Quelltext aus dem Fahrzeughandel einfügen:</label><br>
             <textarea id="import_data" name="import_data" class="import-textarea" required></textarea><br>

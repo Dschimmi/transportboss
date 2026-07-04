@@ -33,89 +33,73 @@ $dispoTrucks = $truckRepo->getActiveForPlanning();
     <link rel="stylesheet" href="main.css">
 </head>
 <body>
-    <div class="main-container">
+    <?php require_once 'nav.php'; ?>
+    <div class="fluid-container">
         <h1 class="accent-text">TransportBoss Dashboard</h1>
 
         <!-- KPI-Übersicht -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px;">
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">Fahrzeuge</h3>
-                <div style="font-size: 2.5em; font-weight: bold; color: #fff; margin: 10px 0;"><?= $totalTrucks ?></div>
-                <div style="color: #aaa; font-size: 0.9em;">Gesamt (disponierbar: <?= $activeTrucks ?>)</div>
+        <div class="dashboard-grid">
+            <div class="dashboard-card">
+                <h3 class="accent-text">Fahrzeuge</h3>
+                <div class="kpi-value"><?= $totalTrucks ?></div>
+                <div class="kpi-desc">Gesamt (disponierbar: <?= $activeTrucks ?>)</div>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">Fahrer</h3>
-                <div style="font-size: 2.5em; font-weight: bold; color: #fff; margin: 10px 0;"><?= $totalDrivers ?></div>
-                <div style="color: #aaa; font-size: 0.9em;">Eingestellt</div>
+            <div class="dashboard-card">
+                <h3 class="accent-text">Fahrer</h3>
+                <div class="kpi-value"><?= $totalDrivers ?></div>
+                <div class="kpi-desc">Eingestellt</div>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">Disponenten</h3>
-                <div style="font-size: 2.5em; font-weight: bold; color: #fff; margin: 10px 0;"><?= $totalDispatchers ?></div>
-                <div style="color: #aaa; font-size: 0.9em;">Eingestellt</div>
+            <div class="dashboard-card">
+                <h3 class="accent-text">Disponenten</h3>
+                <div class="kpi-value"><?= $totalDispatchers ?></div>
+                <div class="kpi-desc">Eingestellt</div>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">Aufträge</h3>
-                <div style="font-size: 2.5em; font-weight: bold; color: #fff; margin: 10px 0;"><?= $openOrders ?></div>
-                <div style="color: #aaa; font-size: 0.9em;">Offen</div>
+            <div class="dashboard-card">
+                <h3 class="accent-text">Aufträge</h3>
+                <div class="kpi-value"><?= $openOrders ?></div>
+                <div class="kpi-desc">Offen</div>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">Umsatz</h3>
-                <div style="font-size: 2.5em; font-weight: bold; color: #fff; margin: 10px 0;">
-                    <?= number_format($totalRevenue, 2, ',', '.') ?> €
-                </div>
-                <div style="color: #aaa; font-size: 0.9em;">Gesamterlös</div>
+            <div class="dashboard-card">
+                <h3 class="accent-text">Umsatz</h3>
+                <div class="kpi-value"><?= number_format($totalRevenue, 2, ',', '.') ?> €</div>
+                <div class="kpi-desc">Gesamterlös</div>
             </div>
         </div>
 
-        <hr style="border-color: #444; margin: 30px 0;">
+        <hr class="section-divider">
 
         <!-- Modul-Übersicht -->
         <h2 class="accent-text">Module</h2>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">🚛 Fuhrpark & Personal</h3>
+        <div class="module-grid">
+            <div class="dashboard-card">
+                <h3 class="accent-text">🚚 Fuhrpark & Personal</h3>
                 <p>Verwalte Fahrzeuge, Fahrer und deren Zuordnung.</p>
-                <a href="fleet_manager.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zum Fuhrpark-Manager</a>
+                <a href="fleet_manager.php" class="module-link">➔ Zum Fuhrpark-Manager</a>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">👔 Disponenten</h3>
+            <div class="dashboard-card">
+                <h3 class="accent-text">🧑‍💼 Disponenten</h3>
                 <p>Verwalte Disponenten und deren Bewerbungen.</p>
-                <a href="dispatcher_manager.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zum Disponenten-Manager</a>
+                <a href="dispatcher_manager.php" class="module-link">➔ Zum Disponenten-Manager</a>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">🗺️ Disposition</h3>
+            <div class="dashboard-card">
+                <h3 class="accent-text">🗺️ Disposition</h3>
                 <p>Bilde optimale Touren für deine Fahrzeuge.</p>
-                <a href="dispatcher_board.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zur Disposition</a>
+                <a href="dispatcher_board.php" class="module-link">➔ Zur Disposition</a>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">📦 Lageraufträge</h3>
+            <div class="dashboard-card">
+                <h3 class="accent-text">📦 Lageraufträge</h3>
                 <p>Verwalte Aufträge aus deinem Lager.</p>
-                <a href="warehouse_view.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zu den Lageraufträgen</a>
+                <a href="warehouse_view.php" class="module-link">➔ Zu den Lageraufträgen</a>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">🌍 Frachtbörse</h3>
+            <div class="dashboard-card">
+                <h3 class="accent-text">💶 Frachtbörse</h3>
                 <p>Durchstöbere verfügbare Marktaufträge.</p>
-                <a href="market_pool.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zur Frachtbörse</a>
+                <a href="market_pool.php" class="module-link">➔ Zur Frachtbörse</a>
             </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">💰 Gebrauchtwagen</h3>
+            <div class="dashboard-card">
+                <h3 class="accent-text">🚛 Gebrauchtwagen</h3>
                 <p>Analysiere den Gebrauchtwagenmarkt.</p>
-                <a href="market_vehicles.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zum Gebrauchtwagen-Markt</a>
-            </div>
-
-            <div style="background-color: #252525; padding: 20px; border-radius: 5px; border: 1px solid #444; text-align: center;">
-                <h3 style="color: #f39c12; margin-top: 0;">📊 Entfernungsmatrix</h3>
-                <p>Pflege die Entfernungen zwischen Städten.</p>
-                <a href="import_matrix.php" style="display: block; margin-top: 15px; padding: 10px; background-color: #1e1e1e; color: #fff; text-decoration: none; border-radius: 3px;">→ Zur Matrix-Verwaltung</a>
+                <a href="market_vehicles.php" class="module-link">➔ Zum Gebrauchtwagen-Markt</a>
             </div>
         </div>
     </div>

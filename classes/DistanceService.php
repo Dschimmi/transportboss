@@ -80,4 +80,18 @@ class DistanceService
         
         $stmt->execute(['a' => $cityA, 'b' => $cityB, 'km' => $km]);
     }
+    public function getNearestCityName(int $cityId): string
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT c.name 
+            FROM distances d
+            JOIN cities c ON (d.city_b_id = c.id)
+            WHERE d.city_a_id = :city_id OR d.city_b_id = :city_id
+            ORDER BY d.distance_km ASC
+            LIMIT 1
+        ");
+        $stmt->execute(['city_id' => $cityId]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ? $result['name'] : 'Unbekannt';
+    }
 }

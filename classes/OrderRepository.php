@@ -123,19 +123,19 @@ class OrderRepository
         // Falls ein Order-Objekt übergeben wurde, in ein Array konvertieren
         if ($orderData instanceof Order) {
             $orderData = [
-                'ingame_order_id' => $orderData->getIngameOrderId(),
-                'freight_type' => $orderData->freightType, // Direkter Zugriff auf private Eigenschaft (nicht ideal, aber funktioniert)
-                'commodity' => $orderData->commodity,
-                'is_adr' => $orderData->isAdr(),
-                'weight_total' => $orderData->weightTotal,
-                'weight_remaining' => $orderData->weightRemaining,
-                'revenue' => $orderData->getRevenue(),
-                'from_city_id' => $orderData->fromCityId,
-                'to_city_id' => $orderData->toCityId,
-                'is_accepted' => $orderData->isAccepted,
-                'is_archived' => $orderData->isArchived,
-                'assigned_truck_id' => $orderData->assignedTruckId,
-                'assigned_at' => $orderData->assignedAt?->format('Y-m-d H:i:s') ?? null
+                'ingame_order_id'   => $orderData->getIngameOrderId(),
+                'freight_type'      => $orderData->getFreightType(),
+                'commodity'         => $orderData->getCommodity(),
+                'is_adr'            => $orderData->isAdr(),
+                'weight_total'      => $orderData->getWeightTotal(),
+                'weight_remaining'  => $orderData->getWeightRemaining(),
+                'revenue'           => $orderData->getRevenue(),
+                'from_city_id'      => $orderData->getFromCityId(),
+                'to_city_id'        => $orderData->getToCityId(),
+                'is_accepted'       => $orderData->isAccepted(),
+                'is_archived'       => $orderData->isArchived(),
+                'assigned_truck_id' => $orderData->getAssignedTruckId(),
+                'assigned_at'       => $orderData->getAssignedAt()?->format('Y-m-d H:i:s'),
             ];
         }
 

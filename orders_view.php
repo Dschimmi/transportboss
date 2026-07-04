@@ -42,7 +42,8 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
     <link rel="stylesheet" href="main.css">
 </head>
 <body>
-    <div class="main-container" style="max-width: 1000px;">
+    <?php require_once 'nav.php'; ?>
+    <div class="fluid-container">
         <h1 class="accent-text">Lukrativste Aufträge (Pool)</h1>
         
         <!-- Filter-Eingabefeld -->
@@ -51,13 +52,13 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
         <table class="data-table" id="sortableTable">
             <thead>
                 <tr>
-                    <th onclick="sortTable(0, 'string')">Von ↕</th>
-                    <th onclick="sortTable(1, 'string')">Nach ↕</th>
-                    <th onclick="sortTable(2, 'string')">Ware (Typ) ↕</th>
-                    <th onclick="sortTable(3, 'number')">Gewicht ↕</th>
-                    <th onclick="sortTable(4, 'number')">Umsatz ↕</th>
-                    <th onclick="sortTable(5, 'number')">Distanz ↕</th>
-                    <th class="accent-text" onclick="sortTable(6, 'number')">€ / km ↕</th>
+                    <th onclick="sortTable(0, 'string')">Von ⇕</th>
+                    <th onclick="sortTable(1, 'string')">Nach ⇕</th>
+                    <th onclick="sortTable(2, 'string')">Ware (Typ) ⇕</th>
+                    <th onclick="sortTable(3, 'number')">Gewicht ⇕</th>
+                    <th onclick="sortTable(4, 'number')">Umsatz ⇕</th>
+                    <th onclick="sortTable(5, 'number')">Distanz ⇕</th>
+                    <th class="accent-text" onclick="sortTable(6, 'number')">€ / km ⇕</th>
                 </tr>
             </thead>
             <tbody>
@@ -70,9 +71,9 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
                     <?= htmlspecialchars($o['commodity']) ?> (<?= htmlspecialchars($o['freight_type']) ?>)
                 </td>
                 <td><?= $o['weight_total'] ?> t</td>
-                <td><?= number_format((float)$o['revenue'], 2) ?> €</td>
+                <td><?= number_format((float)$o['revenue'], 2, ',', '.') ?> €</td>
                 <td><?= $o['km'] ?> km</td>
-                <td class="accent-text"><strong><?= number_format($o['eur_per_km'], 2) ?> €</strong></td>
+                <td class="accent-text"><strong><?= number_format($o['eur_per_km'], 2, ',', '.') ?> €</strong></td>
             </tr>
             <?php endforeach; ?>
             </tbody>

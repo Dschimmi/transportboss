@@ -40,10 +40,12 @@ class TopologyEngine
         // 3. Alle Aufträge in diesen Städten laden (Lager + Marktpool)
         $placeholders = implode(',', array_fill(0, count($relevantCityIds), '?'));
         $orderStmt = $this->pdo->prepare("
-            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name, d.distance_km
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
+            LEFT JOIN distances d ON (d.city_a_id = o.from_city_id AND d.city_b_id = o.to_city_id)
+                                   OR (d.city_a_id = o.to_city_id AND d.city_b_id = o.from_city_id)
             WHERE o.from_city_id IN ($placeholders)
             AND o.is_archived = 0
             AND o.assigned_truck_id IS NULL
@@ -91,6 +93,12 @@ class TopologyEngine
         // 5. Fallback: Falls keine Aufträge in den 3 Städten gefunden wurden
         if (empty($suggestions)) {
             $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t']);
+
+            // Füge direkt danach diesen Debug-Block ein:
+            if (!empty($fallbackOrders) && !isset($fallbackOrders[0]['distance_km'])) {
+                die('<pre>DEBUG INFO: Das Array enthält kein "distance_km"! <br>Struktur des ersten Elements: ' . print_r($fallbackOrders[0], true) . '</pre>');
+            }
+
             foreach ($fallbackOrders as $fallbackOrder) {
                 $distanceToOrder = $this->distanceService->getDistance($currentCityId, $fallbackOrder['from_city_id']);
                 $suggestions[] = [
@@ -145,17 +153,23 @@ class TopologyEngine
      * @return bool
      */
     private function hasAdrDriverForTruck(int $truckId): bool
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT d.adr_permit
-            FROM drivers d
-            JOIN trucks t ON d.assigned_truck_id = t.id
-            WHERE t.id = :truck_id AND d.is_employed = 1
-        ");
-        $stmt->execute(['truck_id' => $truckId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result && $result['adr_permit'];
-    }
+        {
+            // Wir lassen uns mal die Truck ID und alle zugeordneten Fahrer zeigen
+            $stmt = $this->pdo->prepare("
+                SELECT d.id, d.first_name, d.last_name, d.adr_permit, d.assigned_truck_id 
+                FROM drivers d 
+                WHERE d.assigned_truck_id = :truck_id
+            ");
+            $stmt->execute(['truck_id' => $truckId]);
+            $driver = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Debug-Output direkt im Seitenquelltext
+            echo "<!-- DEBUG: Suche Fahrer für LKW-ID $truckId. Gefunden: " . 
+                ($driver ? ($driver['first_name'] . ' ' . $driver['last_name'] . ', ADR: ' . $driver['adr_permit']) : 'KEINER') . 
+                " -->";
+            
+            return $driver && (int)$driver['adr_permit'] === 1;
+        }
 
     /**
      * Prüft, ob freie Slots für Marktaufträge verfügbar sind.
@@ -182,10 +196,12 @@ class TopologyEngine
     {
         $hasAdr = $this->hasAdrDriverForTruck($truckId);
         $stmt = $this->pdo->prepare("
-            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name, d.distance_km
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
+            LEFT JOIN distances d ON (d.city_a_id = o.from_city_id AND d.city_b_id = o.to_city_id)
+                                   OR (d.city_a_id = o.to_city_id AND d.city_b_id = o.from_city_id)
             WHERE o.is_archived = 0
             AND o.freight_type = :vehicle_type
             AND o.weight_total <= :capacity
