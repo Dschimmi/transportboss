@@ -40,12 +40,10 @@ class TopologyEngine
         // 3. Alle Aufträge in diesen Städten laden (Lager + Marktpool)
         $placeholders = implode(',', array_fill(0, count($relevantCityIds), '?'));
         $orderStmt = $this->pdo->prepare("
-            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name, d.distance_km
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
-            LEFT JOIN distances d ON (d.city_a_id = o.from_city_id AND d.city_b_id = o.to_city_id)
-                                   OR (d.city_a_id = o.to_city_id AND d.city_b_id = o.from_city_id)
             WHERE o.from_city_id IN ($placeholders)
             AND o.is_archived = 0
             AND o.assigned_truck_id IS NULL
@@ -61,7 +59,7 @@ class TopologyEngine
         $suggestions = [];
         foreach ($orders as $order) {
             // Fahrzeugtyp prüfen
-            if ($order['freight_type'] !== $truck['vehicle_type']) {
+            if (!$this->isTypeCompatible($order['freight_type'], $truck['vehicle_type'])) {
                 continue;
             }
 
@@ -81,10 +79,11 @@ class TopologyEngine
             }
 
             $distanceToOrder = $this->distanceService->getDistance($currentCityId, $order['from_city_id']);
+            $routeDistance = $this->distanceService->getDistance($order['from_city_id'], $order['to_city_id']);
             $suggestions[] = [
                 'order' => $order,
                 'distance_to_order' => $distanceToOrder,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($order['distance_km'], 1)),
+                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($routeDistance, 1)),
                 'is_fallback' => false,
                 'status' => $order['is_accepted'] ? 'warehouse' : 'market'
             ];
@@ -93,18 +92,13 @@ class TopologyEngine
         // 5. Fallback: Falls keine Aufträge in den 3 Städten gefunden wurden
         if (empty($suggestions)) {
             $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t']);
-
-            // Füge direkt danach diesen Debug-Block ein:
-            if (!empty($fallbackOrders) && !isset($fallbackOrders[0]['distance_km'])) {
-                die('<pre>DEBUG INFO: Das Array enthält kein "distance_km"! <br>Struktur des ersten Elements: ' . print_r($fallbackOrders[0], true) . '</pre>');
-            }
-
             foreach ($fallbackOrders as $fallbackOrder) {
                 $distanceToOrder = $this->distanceService->getDistance($currentCityId, $fallbackOrder['from_city_id']);
+                $routeDistance = $this->distanceService->getDistance($fallbackOrder['from_city_id'], $fallbackOrder['to_city_id']);
                 $suggestions[] = [
                     'order' => $fallbackOrder,
                     'distance_to_order' => $distanceToOrder,
-                    'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($fallbackOrder['distance_km'], 1)),
+                    'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
                     'is_fallback' => true,
                     'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market'
                 ];
@@ -147,29 +141,70 @@ class TopologyEngine
     }
 
     /**
+     * Prüft, ob ein Frachttyp mit einem Fahrzeugtyp kompatibel ist.
+     */
+    private function isTypeCompatible(string $freightType, string $vehicleType): bool
+    {
+        if ($freightType === $vehicleType) {
+            return true;
+        }
+
+        // Mapping von Frachttyp (aus dem Spiel) -> Fahrzeugtyp (aus trucks.vehicle_type)
+        $mapping = [
+            'Plane(Wetterschutz)' => 'Plane',
+            'Kühlwaren'            => 'Kühlwagen',
+            'Kofferwagen'          => 'Koffer',
+            'Flüssigkeiten'        => 'Tankwagen',
+        ];
+
+        if (isset($mapping[$freightType])) {
+            return $mapping[$freightType] === $vehicleType;
+        }
+
+        return false;
+    }
+
+    /**
+     * Gibt alle kompatiblen Frachttypen für einen Fahrzeugtyp zurück.
+     */
+    private function getCompatibleFreightTypes(string $vehicleType): array
+    {
+        $types = [$vehicleType];
+        switch ($vehicleType) {
+            case 'Plane':
+                $types[] = 'Plane(Wetterschutz)';
+                break;
+            case 'Kühlwagen':
+                $types[] = 'Kühlwaren';
+                break;
+            case 'Koffer':
+                $types[] = 'Kofferwagen';
+                break;
+            case 'Tankwagen':
+                $types[] = 'Flüssigkeiten';
+                break;
+        }
+        return $types;
+    }
+
+    /**
      * Prüft, ob das Fahrzeug einen Fahrer mit ADR-Erlaubnis hat.
      *
      * @param int $truckId Die Fahrzeug-ID
      * @return bool
      */
     private function hasAdrDriverForTruck(int $truckId): bool
-        {
-            // Wir lassen uns mal die Truck ID und alle zugeordneten Fahrer zeigen
-            $stmt = $this->pdo->prepare("
-                SELECT d.id, d.first_name, d.last_name, d.adr_permit, d.assigned_truck_id 
-                FROM drivers d 
-                WHERE d.assigned_truck_id = :truck_id
-            ");
-            $stmt->execute(['truck_id' => $truckId]);
-            $driver = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            // Debug-Output direkt im Seitenquelltext
-            echo "<!-- DEBUG: Suche Fahrer für LKW-ID $truckId. Gefunden: " . 
-                ($driver ? ($driver['first_name'] . ' ' . $driver['last_name'] . ', ADR: ' . $driver['adr_permit']) : 'KEINER') . 
-                " -->";
-            
-            return $driver && (int)$driver['adr_permit'] === 1;
-        }
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT d.adr_permit
+            FROM drivers d
+            JOIN trucks t ON (d.assigned_truck_id = t.id OR t.assigned_driver_id = d.ingame_driver_id)
+            WHERE t.id = :truck_id AND d.is_employed = 1
+        ");
+        $stmt->execute(['truck_id' => $truckId]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result && $result['adr_permit'];
+    }
 
     /**
      * Prüft, ob freie Slots für Marktaufträge verfügbar sind.
@@ -178,7 +213,11 @@ class TopologyEngine
      */
     private function hasFreeSlots(): bool
     {
-        $globalLimit = 10; // Beispielwert (anpassen!)
+        $limitStmt = $this->pdo->query("SELECT cfg_value FROM config WHERE cfg_key = 'max_dispo_slots'");
+        $globalLimit = $limitStmt ? (int)$limitStmt->fetchColumn() : 26;
+        if ($globalLimit <= 0) {
+            $globalLimit = 26;
+        }
         $stmt = $this->pdo->query("SELECT COUNT(*) AS count FROM orders WHERE is_accepted = 1 AND is_archived = 0");
         $usedSlots = (int)$stmt->fetch(PDO::FETCH_ASSOC)['count'];
         return ($globalLimit - $usedSlots) > 0;
@@ -195,26 +234,37 @@ class TopologyEngine
     private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity): array
     {
         $hasAdr = $this->hasAdrDriverForTruck($truckId);
+        $compatibleTypes = $this->getCompatibleFreightTypes($vehicleType);
+        
+        $placeholders = [];
+        $params = [
+            'capacity' => $capacity,
+            'has_adr' => (int)$hasAdr
+        ];
+        
+        foreach ($compatibleTypes as $index => $type) {
+            $key = 'type_' . $index;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $type;
+        }
+        
+        $placeholdersStr = implode(',', $placeholders);
+
         $stmt = $this->pdo->prepare("
-            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name, d.distance_km
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
-            LEFT JOIN distances d ON (d.city_a_id = o.from_city_id AND d.city_b_id = o.to_city_id)
-                                   OR (d.city_a_id = o.to_city_id AND d.city_b_id = o.from_city_id)
             WHERE o.is_archived = 0
-            AND o.freight_type = :vehicle_type
+            AND o.freight_type IN ($placeholdersStr)
             AND o.weight_total <= :capacity
             AND (o.is_adr = 0 OR :has_adr = 1)
             AND o.assigned_truck_id IS NULL
             ORDER BY (o.revenue / o.weight_total) DESC
             LIMIT 10
         ");
-        $stmt->execute([
-            'vehicle_type' => $vehicleType,
-            'capacity' => $capacity,
-            'has_adr' => (int)$hasAdr
-        ]);
+        
+        $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }
