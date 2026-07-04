@@ -24,7 +24,7 @@ class TopologyEngine
      */
     public function getSuggestionsForTruck(int $truckId, int $currentCityId): array
     {
-        // 1. Fahrzeugdaten laden (Kapazität, Typ)
+        // 1. Fahrzeugdaten laden
         $truckStmt = $this->pdo->prepare("SELECT capacity_t, vehicle_type FROM trucks WHERE id = :id");
         $truckStmt->execute(['id' => $truckId]);
         $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
@@ -33,64 +33,79 @@ class TopologyEngine
             return [];
         }
 
-        // 2. Die 2 nächstgelegenen Städte zur aktuellen Stadt finden (PH 4.4.4.1)
+        // 2. Die 2 nächstgelegenen Städte zur aktuellen Stadt finden
         $neighborCities = $this->getNearestCities($currentCityId, 2);
         $relevantCityIds = array_merge([$currentCityId], $neighborCities);
 
         // 3. Alle Aufträge in diesen Städten laden (Lager + Marktpool)
+        $placeholders = implode(',', array_fill(0, count($relevantCityIds), '?'));
         $orderStmt = $this->pdo->prepare("
             SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
-            WHERE o.from_city_id IN (" . implode(',', array_fill(0, count($relevantCityIds), '?')) . ")
+            WHERE o.from_city_id IN ($placeholders)
             AND o.is_archived = 0
+            AND o.assigned_truck_id IS NULL
             ORDER BY o.from_city_id = :current_city DESC, o.revenue / (o.weight_total * o.distance_km) DESC
         ");
 
         $orderStmt->execute(array_merge($relevantCityIds, ['current_city' => $currentCityId]));
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // 4. Aufträge filtern (Typ und Kapazität prüfen)
+        // 4. Aufträge filtern (Typ, Kapazität, ADR)
         $suggestions = [];
         foreach ($orders as $order) {
-            // 4.1. Fahrzeugtyp prüfen (PH 4.4.4.3)
+            // Fahrzeugtyp prüfen
             if ($order['freight_type'] !== $truck['vehicle_type']) {
                 continue;
             }
 
-            // 4.2. Kapazität prüfen (PH 4.4.4.3)
+            // Kapazität prüfen
             if ($order['weight_total'] > $truck['capacity_t']) {
                 continue;
             }
 
-            // 4.3. ADR prüfen (falls nötig)
+            // ADR prüfen
             if ($order['is_adr'] && !$this->hasAdrDriverForTruck($truckId)) {
                 continue;
             }
 
-            // 4.4. Slot-Prüfung für Marktaufträge (PH 4.4.4.4)
+            // Slot-Prüfung für Marktaufträge
             if (!$order['is_accepted'] && !$this->hasFreeSlots()) {
                 continue;
             }
 
-            // Distanz zur Abholstadt berechnen
             $distanceToOrder = $this->distanceService->getDistance($currentCityId, $order['from_city_id']);
-
             $suggestions[] = [
                 'order' => $order,
                 'distance_to_order' => $distanceToOrder,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($order['distance_km'], 1))
+                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($order['distance_km'], 1)),
+                'is_fallback' => false,
+                'status' => $order['is_accepted'] ? 'warehouse' : 'market'
             ];
         }
 
-        // 5. Nach Priorität sortieren (PH 4.4.5)
+        // 5. Fallback: Falls keine Aufträge in den 3 Städten gefunden wurden
+        if (empty($suggestions)) {
+            $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t']);
+            foreach ($fallbackOrders as $fallbackOrder) {
+                $distanceToOrder = $this->distanceService->getDistance($currentCityId, $fallbackOrder['from_city_id']);
+                $suggestions[] = [
+                    'order' => $fallbackOrder,
+                    'distance_to_order' => $distanceToOrder,
+                    'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($fallbackOrder['distance_km'], 1)),
+                    'is_fallback' => true,
+                    'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market'
+                ];
+            }
+        }
+
+        // 6. Nach Priorität sortieren
         usort($suggestions, function($a, $b) {
-            // Primär: Kürzeste Distanz zur Abholstadt
             if ($a['distance_to_order'] !== $b['distance_to_order']) {
                 return $a['distance_to_order'] <=> $b['distance_to_order'];
             }
-            // Sekundär: Höchster Erlös pro tkm
             return $b['earning_per_tkm'] <=> $a['earning_per_tkm'];
         });
 
@@ -147,10 +162,41 @@ class TopologyEngine
      */
     private function hasFreeSlots(): bool
     {
-        // PH 4.4.2: Freie_Slots = Globales_Limit - Anzahl_Lageraufträge
         $globalLimit = 10; // Beispielwert (anpassen!)
         $stmt = $this->pdo->query("SELECT COUNT(*) AS count FROM orders WHERE is_accepted = 1 AND is_archived = 0");
         $usedSlots = (int)$stmt->fetch(PDO::FETCH_ASSOC)['count'];
         return ($globalLimit - $usedSlots) > 0;
+    }
+
+    /**
+     * Führt einen globalen Scan durch, falls die 3-Städte-Regel keine Ergebnisse liefert.
+     *
+     * @param int $truckId Die Fahrzeug-ID
+     * @param string $vehicleType Der Fahrzeugtyp
+     * @param int $capacity Die Kapazität des Fahrzeugs
+     * @return array Array mit Fallback-Aufträgen
+     */
+    private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity): array
+    {
+        $hasAdr = $this->hasAdrDriverForTruck($truckId);
+        $stmt = $this->pdo->prepare("
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+            FROM orders o
+            JOIN cities c1 ON o.from_city_id = c1.id
+            JOIN cities c2 ON o.to_city_id = c2.id
+            WHERE o.is_archived = 0
+            AND o.freight_type = :vehicle_type
+            AND o.weight_total <= :capacity
+            AND (o.is_adr = 0 OR :has_adr = 1)
+            AND o.assigned_truck_id IS NULL
+            ORDER BY o.revenue / (o.weight_total * o.distance_km) DESC
+            LIMIT 10
+        ");
+        $stmt->execute([
+            'vehicle_type' => $vehicleType,
+            'capacity' => $capacity,
+            'has_adr' => (int)$hasAdr
+        ]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }

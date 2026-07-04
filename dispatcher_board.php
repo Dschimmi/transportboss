@@ -15,10 +15,21 @@ $orderRepo = new OrderRepository($pdo);
 $distanceService = new DistanceService($pdo);
 $topologyEngine = new TopologyEngine($pdo, $distanceService);
 
-// Alle Fahrzeuge laden (auch inaktive)
+// Fokus-System
+$focusTruckId = null;
+if (isset($_GET['focus_truck_id'])) {
+    $focusTruckId = (int)$_GET['focus_truck_id'];
+    $pdo->exec("UPDATE trucks SET is_focussed = 0");
+    $pdo->exec("UPDATE trucks SET is_focussed = 1 WHERE id = $focusTruckId");
+} else {
+    $firstTruck = $pdo->query("SELECT id FROM trucks WHERE assigned_driver_id IS NOT NULL LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $focusTruckId = $firstTruck ? (int)$firstTruck['id'] : null;
+}
+
+// Alle disponiblen Fahrzeuge laden
 $allTrucks = $truckRepo->getAllOwned();
 
-// Alle Städte mit Lagerbestand/Marktpool laden (für Sidebar)
+// Städte für Sidebar laden
 $cities = $pdo->query("
     SELECT
         c.id,
@@ -30,14 +41,6 @@ $cities = $pdo->query("
     GROUP BY c.id, c.name
     ORDER BY market_jobs ASC, c.name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
-
-// Fokus-System: Standardmäßig erstes Fahrzeug fokussieren
-$focusTruckId = $_GET['focus_truck_id'] ?? ($allTrucks[0]['id'] ?? null);
-if ($focusTruckId) {
-    // Fokus in der DB setzen (PH 4.2.6.3.1)
-    $pdo->exec("UPDATE trucks SET is_focussed = 0");
-    $pdo->exec("UPDATE trucks SET is_focussed = 1 WHERE id = $focusTruckId");
-}
 
 // Vorschläge für das fokussierte Fahrzeug laden
 $suggestions = [];
@@ -56,142 +59,22 @@ if ($focusTruckId) {
     <meta charset="UTF-8">
     <title>Dispatcher Board - TransportBoss</title>
     <link rel="stylesheet" href="main.css">
-    <style>
-        /* Dispatcher-Board-spezifische Stile (können später in main.css verschoben werden) */
-        .dispatcher-container {
-            display: flex;
-            height: calc(100vh - 60px); /* Vollbildhöhe minus Header */
-        }
-        .sidebar {
-            width: 350px;
-            background-color: #1e1e1e;
-            border-right: 1px solid #444;
-            overflow-y: auto;
-            padding: 15px;
-            box-sizing: border-box;
-        }
-        .fleet-board {
-            flex: 1;
-            overflow-y: auto;
-            padding: 15px;
-            box-sizing: border-box;
-        }
-        .truck-cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 15px;
-        }
-        .truck-card {
-            background-color: #252525;
-            border-radius: 5px;
-            border: 1px solid #444;
-            padding: 15px;
-            box-sizing: border-box;
-            cursor: pointer;
-        }
-        .truck-card-active {
-            border-left: 5px solid #27ae60; /* Grüne Randmarkierung für aktive Fahrzeuge */
-            opacity: 1;
-            filter: grayscale(0);
-        }
-        .truck-card-inactive {
-            opacity: 0.6;
-            filter: grayscale(0.5);
-        }
-        .truck-card-focussed {
-            border-left: 5px solid #f39c12; /* Orange Randmarkierung für fokussiertes Fahrzeug */
-        }
-        .truck-header {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-        .truck-id-type {
-            font-weight: bold;
-            color: #f39c12;
-        }
-        .truck-driver {
-            color: #fff;
-        }
-        .truck-capacity {
-            color: #aaa;
-        }
-        .badge-jobs {
-            background-color: #f39c12;
-            color: #000;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }
-        .tour-end {
-            color: #3498db;
-        }
-        .tour-end-enroute {
-            color: #f39c12;
-        }
-        .sidebar-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .sidebar-table th, .sidebar-table td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #444;
-        }
-        .sidebar-table th {
-            background-color: #252525;
-            color: #f39c12;
-            cursor: pointer;
-        }
-        .status-missing {
-            color: #e74c3c;
-            font-weight: bold;
-        }
-        .suggestion-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-        .suggestion-table th, .suggestion-table td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #444;
-        }
-        .suggestion-table th {
-            background-color: #252525;
-            color: #f39c12;
-        }
-        .status-warehouse {
-            color: #2ecc71;
-            font-weight: bold;
-        }
-        .status-market {
-            color: #3498db;
-            font-weight: bold;
-        }
-        .status-fallback {
-            color: #e74c3c;
-            font-weight: bold;
-        }
-    </style>
 </head>
 <body>
     <div class="main-container">
         <h1 class="accent-text">Dispatcher Board</h1>
 
-        <div class="dispatcher-container">
+        <div style="display: flex; height: calc(100vh - 100px);">
             <!-- LINKE SPALTE: Sidebar (Strategie-Monitor) -->
-            <div class="sidebar">
+            <div style="width: 350px; background-color: #1e1e1e; border-right: 1px solid #444; overflow-y: auto; padding: 15px;">
                 <h2 class="accent-text">Strategie-Monitor</h2>
                 <input type="text" id="cityFilter" class="filter-input" placeholder="Städte filtern...">
-                <table class="sidebar-table" id="sidebarTable">
+                <table class="data-table" id="sidebarTable">
                     <thead>
                         <tr>
-                            <th onclick="sortSidebar(0)">Stadt ⇅</th>
-                            <th onclick="sortSidebar(1)">Jobs ⇅</th>
-                            <th onclick="sortSidebar(2)">Bestand (t) ⇅</th>
+                            <th>Stadt</th>
+                            <th>Jobs (Markt)</th>
+                            <th>Bestand (t)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -209,50 +92,43 @@ if ($focusTruckId) {
             </div>
 
             <!-- RECHTE SPALTE: Fuhrpark-Board -->
-            <div class="fleet-board">
+            <div style="flex: 1; overflow-y: auto; padding: 15px;">
                 <h2 class="accent-text">Fuhrpark-Board</h2>
 
-                <!-- Steuerungs-Modul (Header) -->
+                <!-- Steuerungs-Modul -->
                 <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
                     <button id="toggleAllTours" class="btn-primary">Alle Touren einklappen</button>
-                    <span style="margin-left: auto; color: #aaa;">Aktive Fahrzeuge: <?= count(array_filter($allTrucks, fn($t) => $t['is_active_planning'])) ?></span>
                 </div>
 
                 <!-- Fahrzeugkarten -->
-                <div class="truck-cards">
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 15px;">
                     <?php foreach ($allTrucks as $truck): ?>
-                    <div class="truck-card
-                        <?= $truck['is_active_planning'] ? 'truck-card-active' : 'truck-card-inactive' ?>
+                    <div class="truck-card <?= $truck['is_active_planning'] ? 'truck-card-active' : 'truck-card-inactive' ?>
                         <?= $truck['id'] == $focusTruckId ? 'truck-card-focussed' : '' ?>"
-                         onclick="focusTruck(<?= $truck['id'] ?>)"
-                         data-truck-id="<?= $truck['id'] ?>">
+                         onclick="window.location.href='?focus_truck_id=<?= $truck['id'] ?>'">
 
                         <!-- Header -->
-                        <div class="truck-header">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
                             <div>
-                                <div class="truck-id-type">
+                                <div style="font-weight: bold; color: #f39c12;">
                                     ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?> |
                                     <?= htmlspecialchars($truck['vehicle_type']) ?>
                                 </div>
-                                <?php if ($truck['assigned_driver_id']): ?>
-                                    <?php $driver = $driverRepo->getById($truck['assigned_driver_id']); ?>
-                                    <div class="truck-driver">
+                                <?php
+                                $driver = $driverRepo->getById($truck['assigned_driver_id']);
+                                if ($driver):
+                                ?>
+                                    <div style="color: #fff;">
                                         <?= htmlspecialchars($driver['last_name'] . ', ' . substr($driver['first_name'], 0, 1) . '.') ?>
                                         <?php if ($driver['adr_permit']): ?>
-                                            <span style="color: #e74c3c;"> [ADR]</span>
+                                            <span class="adr-badge">[ADR]</span>
                                         <?php endif; ?>
                                     </div>
-                                <?php else: ?>
-                                    <div class="truck-driver" style="color: #e74c3c;">UNBESETZT</div>
                                 <?php endif; ?>
                             </div>
                             <div style="text-align: right;">
-                                <div class="truck-capacity"><?= $truck['capacity_t'] ?> t</div>
-                                <div>
-                                    <span class="badge-jobs">
-                                        <?= $truck['job_count'] ?? 0 ?> Jobs
-                                    </span>
-                                </div>
+                                <div style="color: #aaa;"><?= $truck['capacity_t'] ?> t</div>
+                                <div><span class="badge-jobs"><?= $truck['job_count'] ?? 0 ?> Jobs</span></div>
                             </div>
                         </div>
 
@@ -261,11 +137,11 @@ if ($focusTruckId) {
                             <?php
                             $lastOrder = $orderRepo->getLastOrderForTruck($truck['id']);
                             if ($lastOrder) {
-                                $tourEndCity = $pdo->query("SELECT name FROM cities WHERE id = " . $lastOrder['to_city_id'])->fetchColumn();
-                                echo '<span class="tour-end-enroute">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
+                                $tourEndCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$lastOrder['to_city_id'])->fetchColumn();
+                                echo '<span style="color: #f39c12;">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
                             } else {
-                                $currentCity = $pdo->query("SELECT name FROM cities WHERE id = " . $truck['current_city_id'])->fetchColumn();
-                                echo '<span class="tour-end">📍 POS: ' . htmlspecialchars($currentCity) . '</span>';
+                                $currentCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$truck['current_city_id'])->fetchColumn();
+                                echo '<span style="color: #3498db;">📍 POS: ' . htmlspecialchars($currentCity) . '</span>';
                             }
                             ?>
                         </div>
@@ -284,59 +160,64 @@ if ($focusTruckId) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <!-- Hier kommen die eingeplanten Aufträge rein -->
                                     <tr>
-                                        <td colspan="6" style="text-align: center; color: #888;">Keine Tour geplant</td>
+                                        <td colspan="6" style="text-align: center; color: #888;">Tourenplan wird hier angezeigt</td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
 
                         <!-- Vorschlagsliste (nur für fokussiertes Fahrzeug) -->
-                        <?php if ($truck['id'] == $focusTruckId && !empty($suggestions)): ?>
-                        <div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px;">
-                            <h4 class="accent-text">Vorschläge für dieses Fahrzeug</h4>
-                            <table class="suggestion-table">
-                                <thead>
-                                    <tr>
-                                        <th>Auftrags-ID</th>
-                                        <th>Route</th>
-                                        <th>Typ</th>
-                                        <th>Gewicht</th>
-                                        <th>Erlös</th>
-                                        <th>Distanz</th>
-                                        <th>Status</th>
-                                        <th>Aktion</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($suggestions as $suggestion): ?>
-                                    <?php $order = $suggestion['order']; ?>
-                                    <tr class="<?= $suggestion['is_fallback'] ? 'status-fallback' : '' ?>">
-                                        <td><?= htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool') ?></td>
-                                        <td>
-                                            <?= htmlspecialchars($order['from_city_name']) ?> →
-                                            <?= htmlspecialchars($order['to_city_name']) ?>
-                                        </td>
-                                        <td><?= htmlspecialchars($order['freight_type']) ?></td>
-                                        <td><?= $order['weight_total'] ?> t</td>
-                                        <td><?= number_format($order['revenue'], 2, ',', '.') ?> €</td>
-                                        <td><?= $suggestion['distance_to_order'] ?> km</td>
-                                        <td class="status-<?= $suggestion['status'] ?>">
-                                            <?= $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE' ?>
-                                        </td>
-                                        <td>
-                                            <form method="post" action="load_job.php" style="display: inline;">
-                                                <input type="hidden" name="truck_id" value="<?= $truck['id'] ?>">
-                                                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
-                                                <button type="submit" class="btn-primary">Laden</button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                        <?php if ($truck['id'] == $focusTruckId): ?>
+                            <?php if (!empty($suggestions)): ?>
+                            <div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px;">
+                                <h4 class="accent-text">Vorschläge für dieses Fahrzeug</h4>
+                                <table class="suggestion-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Auftrags-ID</th>
+                                            <th>Route</th>
+                                            <th>Typ</th>
+                                            <th>Gewicht</th>
+                                            <th>Erlös</th>
+                                            <th>Distanz</th>
+                                            <th>Status</th>
+                                            <th>Aktion</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($suggestions as $suggestion): ?>
+                                        <?php $order = $suggestion['order']; ?>
+                                        <tr class="<?= $suggestion['is_fallback'] ? 'status-fallback' : '' ?>">
+                                            <td><?= htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool') ?></td>
+                                            <td>
+                                                <?= htmlspecialchars($order['from_city_name']) ?> →
+                                                <?= htmlspecialchars($order['to_city_name']) ?>
+                                            </td>
+                                            <td><?= htmlspecialchars($order['freight_type']) ?></td>
+                                            <td><?= $order['weight_total'] ?> t</td>
+                                            <td><?= number_format($order['revenue'], 2, ',', '.') ?> €</td>
+                                            <td><?= $suggestion['distance_to_order'] ?> km</td>
+                                            <td class="status-<?= $suggestion['status'] ?>">
+                                                <?= $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE' ?>
+                                            </td>
+                                            <td>
+                                                <form method="post" action="load_job.php" style="display: inline;">
+                                                    <input type="hidden" name="truck_id" value="<?= $truck['id'] ?>">
+                                                    <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                                                    <button type="submit" class="btn-primary">Laden</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php else: ?>
+                            <div style="margin-top: 15px; color: #888; font-style: italic;">
+                                Keine passenden Aufträge für dieses Fahrzeug gefunden.
+                            </div>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </div>
                     <?php endforeach; ?>
@@ -345,23 +226,12 @@ if ($focusTruckId) {
         </div>
     </div>
 
-    <!-- JavaScript für Sortierung, Filter, Fokus -->
+    <!-- JavaScript für Filter, Sortierung, Tourenplan -->
     <script>
-        // Fokus-Wechsel
-        function focusTruck(truckId) {
-            window.location.href = '?focus_truck_id=' + truckId;
-        }
-
-        // Sidebar-Sortierung
-        function sortSidebar(columnIndex) {
-            // Wird später implementiert
-        }
-
         // Sidebar-Filter
         document.getElementById('cityFilter').addEventListener('keyup', function() {
             const filter = this.value.toLowerCase();
             const rows = document.querySelectorAll('#sidebarTable tbody tr');
-
             rows.forEach(row => {
                 const text = row.textContent.toLowerCase();
                 row.style.display = text.includes(filter) ? '' : 'none';
@@ -372,11 +242,9 @@ if ($focusTruckId) {
         document.getElementById('toggleAllTours').addEventListener('click', function() {
             const containers = document.querySelectorAll('.tour-plan-container');
             const isCollapsed = this.textContent.includes('einklappen');
-
             containers.forEach(container => {
                 container.style.display = isCollapsed ? 'none' : 'block';
             });
-
             this.textContent = isCollapsed ? 'Alle Touren ausklappen' : 'Alle Touren einklappen';
         });
     </script>
