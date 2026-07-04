@@ -112,4 +112,63 @@ class OrderRepository
             ");
         }
     }
+    /**
+     * Speichert einen neuen Auftrag oder aktualisiert bestehende Daten (Upsert).
+     *
+     * @param array|Order $orderData Assoziatives Array oder Order-Objekt mit Auftragsdaten
+     * @return void
+     */
+    public function save($orderData): void
+    {
+        // Falls ein Order-Objekt übergeben wurde, in ein Array konvertieren
+        if ($orderData instanceof Order) {
+            $orderData = [
+                'ingame_order_id' => $orderData->getIngameOrderId(),
+                'freight_type' => $orderData->freightType, // Direkter Zugriff auf private Eigenschaft (nicht ideal, aber funktioniert)
+                'commodity' => $orderData->commodity,
+                'is_adr' => $orderData->isAdr(),
+                'weight_total' => $orderData->weightTotal,
+                'weight_remaining' => $orderData->weightRemaining,
+                'revenue' => $orderData->getRevenue(),
+                'from_city_id' => $orderData->fromCityId,
+                'to_city_id' => $orderData->toCityId,
+                'is_accepted' => $orderData->isAccepted,
+                'is_archived' => $orderData->isArchived,
+                'assigned_truck_id' => $orderData->assignedTruckId,
+                'assigned_at' => $orderData->assignedAt?->format('Y-m-d H:i:s') ?? null
+            ];
+        }
+
+        $stmt = $this->pdo->prepare("
+            INSERT INTO orders (
+                ingame_order_id, freight_type, commodity, is_adr, weight_total, weight_remaining,
+                revenue, from_city_id, to_city_id, is_accepted, is_archived, assigned_truck_id,
+                assigned_at, last_seen_at
+            ) VALUES (
+                :ingame_order_id, :freight_type, :commodity, :is_adr, :weight_total, :weight_remaining,
+                :revenue, :from_city_id, :to_city_id, :is_accepted, :is_archived, :assigned_truck_id,
+                :assigned_at, :last_seen_at
+            ) ON DUPLICATE KEY UPDATE
+                weight_remaining = VALUES(weight_remaining),
+                last_seen_at = VALUES(last_seen_at),
+                is_archived = 0
+        ");
+
+        $stmt->execute([
+            'ingame_order_id' => $orderData['ingame_order_id'] ?? null,
+            'freight_type' => $orderData['freight_type'] ?? null,
+            'commodity' => $orderData['commodity'] ?? null,
+            'is_adr' => (int)($orderData['is_adr'] ?? false),
+            'weight_total' => (int)($orderData['weight_total'] ?? 0),
+            'weight_remaining' => (int)($orderData['weight_remaining'] ?? 0),
+            'revenue' => (float)($orderData['revenue'] ?? 0),
+            'from_city_id' => (int)($orderData['from_city_id'] ?? 0),
+            'to_city_id' => (int)($orderData['to_city_id'] ?? 0),
+            'is_accepted' => (int)($orderData['is_accepted'] ?? false),
+            'is_archived' => (int)($orderData['is_archived'] ?? false),
+            'assigned_truck_id' => $orderData['assigned_truck_id'] ?? null,
+            'assigned_at' => $orderData['assigned_at'] ?? null,
+            'last_seen_at' => date('Y-m-d H:i:s')
+        ]);
+    }
 }
