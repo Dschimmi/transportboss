@@ -90,4 +90,38 @@ class TruckRepository
             'truck_id'  => $truckIngameId
         ]);
     }
+    /**
+     * Lädt alle Fahrzeuge, die für die Disposition aktiviert sind (is_active_planning = 1).
+     *
+     * @return array Array mit assoziativen Arrays der aktiven Fahrzeuge
+     */
+    public function getActiveForPlanning(): array
+    {
+        $stmt = $this->pdo->query("
+            SELECT t.*, c.name AS current_city_name
+            FROM trucks t
+            LEFT JOIN cities c ON t.current_city_id = c.id
+            WHERE t.is_active_planning = 1
+            ORDER BY t.vehicle_type, t.capacity_t DESC
+        ");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Lädt ein Fahrzeug anhand seiner ID.
+     *
+     * @param int $id Die Fahrzeug-ID
+     * @return array|null Assoziatives Array des Fahrzeugs oder NULL
+     */
+    public function getById(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT t.*, c.name AS current_city_name
+            FROM trucks t
+            LEFT JOIN cities c ON t.current_city_id = c.id
+            WHERE t.id = :id
+        ");
+        $stmt->execute(['id' => $id]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
 }

@@ -107,4 +107,23 @@ class OrderRepository
 
         return false;
     }
+    /**
+     * Weist einen Auftrag einem Fahrzeug zu.
+     *
+     * @param int $orderId Die Auftrags-ID
+     * @param int $truckId Die Fahrzeug-ID
+     * @return void
+     */
+    public function assignToTruck(int $orderId, int $truckId): void
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE orders
+            SET assigned_truck_id = :truck_id, assigned_at = NOW(), is_accepted = 1
+            WHERE id = :order_id
+        ");
+        $stmt->execute([
+            'truck_id' => $truckId,
+            'order_id' => $orderId
+        ]);
+    }
 }
