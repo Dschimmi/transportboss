@@ -126,4 +126,50 @@ class OrderRepository
             'order_id' => $orderId
         ]);
     }
+    /**
+     * Zählt alle offenen Aufträge (nicht archiviert, nicht zugewiesen).
+     *
+     * @return int Anzahl der offenen Aufträge
+     */
+    public function getOpenOrdersCount(): int
+    {
+        $stmt = $this->pdo->query("
+            SELECT COUNT(*) AS count
+            FROM orders
+            WHERE is_archived = 0
+            AND (assigned_truck_id IS NULL OR assigned_truck_id = 0)
+        ");
+        return (int)$stmt->fetch(PDO::FETCH_ASSOC)['count'];
+    }
+
+    /**
+     * Berechnet den gesamten Umsatz aller Aufträge.
+     *
+     * @return float Gesamterlös
+     */
+    public function getTotalRevenue(): float
+    {
+        $stmt = $this->pdo->query("SELECT SUM(revenue) AS total FROM orders WHERE is_archived = 0");
+        return (float)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    /**
+     * Lädt den letzten Auftrag für ein Fahrzeug (für virtuelles Tourende).
+     *
+     * @param int $truckId Die Fahrzeug-ID
+     * @return array|null Assoziatives Array des letzten Auftrags oder NULL
+     */
+    public function getLastOrderForTruck(int $truckId): ?array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT o.*
+            FROM orders o
+            WHERE o.assigned_truck_id = :truck_id
+            AND o.is_archived = 0
+            ORDER BY o.assigned_at DESC
+            LIMIT 1
+        ");
+        $stmt->execute(['truck_id' => $truckId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
 }
