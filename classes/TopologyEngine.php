@@ -47,15 +47,12 @@ class TopologyEngine
             WHERE o.from_city_id IN ($placeholders)
             AND o.is_archived = 0
             AND o.assigned_truck_id IS NULL
-            ORDER BY o.from_city_id = :current_city DESC, o.revenue / (o.weight_total * o.distance_km) DESC
+            ORDER BY o.from_city_id = ? DESC, (o.revenue / o.weight_total) DESC
         ");
 
-        $params = $relevantCityIds;
-        $params['current_city'] = $currentCityId;
+        // Füge currentCityId als letzten Parameter hinzu
+        $params = array_merge($relevantCityIds, [$currentCityId]);
         $orderStmt->execute($params);
-        $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $orderStmt->execute(array_merge($relevantCityIds, ['current_city' => $currentCityId]));
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
 
         // 4. Aufträge filtern (Typ, Kapazität, ADR)
@@ -194,7 +191,7 @@ class TopologyEngine
             AND o.weight_total <= :capacity
             AND (o.is_adr = 0 OR :has_adr = 1)
             AND o.assigned_truck_id IS NULL
-            ORDER BY o.revenue / (o.weight_total * o.distance_km) DESC
+            ORDER BY (o.revenue / o.weight_total) DESC
             LIMIT 10
         ");
         $stmt->execute([
