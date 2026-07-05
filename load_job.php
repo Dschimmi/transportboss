@@ -7,7 +7,7 @@ require_once 'classes/OrderRepository.php';
 
 // Prüfe, ob truck_id und order_id gesetzt sind
 if (!isset($_POST['truck_id'], $_POST['order_id'])) {
-    header('Location: dispatcher.php');
+    header('Location: dispatcher_board.php');
     exit;
 }
 
@@ -21,5 +21,5 @@ $orderRepo = new OrderRepository($pdo);
 $orderRepo->assignToTruck($orderId, $truckId);
 
 // 2. Zurück zur Disposition mit dem ausgewählten Fahrzeug
-header("Location: dispatcher.php?truck_id=$truckId");
+header("Location: dispatcher_board.php?focus_truck_id=$truckId");
 exit;
