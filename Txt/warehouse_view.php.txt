@@ -1,85 +1,38 @@
 <?php
 declare(strict_types=1);
 
-/**
- * warehouse_view.php
- *
- * Sichtensteuerung für das eigene Lager (angenommene Aufträge).
- * Lädt alle verplanten und angenommenen Aufträge, berechnet die Marge pro Kilometer
- * über den DistanceService und sortiert diese standardmäßig nach Rentabilität.
- *
- * @author TransportBoss Development
- * @version 1.1.1
- */
-
-// Zentrale Abhängigkeiten laden
 require_once 'db_connect.php';
 require_once 'classes/DistanceService.php';
 
-/**
- * WarehouseViewController
- *
- * Kapselt alle Datenbankoperationen, die dynamische Entfernungsermittlung
- * und die Margen-Kalkulation für die Lagerbestandsübersicht.
- */
-class WarehouseViewController
-{
-    private PDO $pdo;
-    private DistanceService $distanceService;
-
-    /**
-     * @param PDO $pdo Die aktive Datenbankverbindung
-     * @param DistanceService $distanceService Der Dienst zur Entfernungsberechnung
-     */
-    public function __construct(PDO $pdo, DistanceService $distanceService)
-    {
-        $this->pdo = $pdo;
-        $this->distanceService = $distanceService;
-    }
-
-    /**
-     * Lädt alle aktiven Lageraufträge, berechnet live die Rentabilität (€/km)
-     * und liefert die Liste nach Profitabilität sortiert zurück.
-     *
-     * @return array Liste der sortierten Lageraufträge
-     */
-    public function getRankedWarehouseOrders(): array
-    {
-        // 1. Akzeptierte, nicht archivierte Lageraufträge (is_accepted = 1, is_archived = 0) laden
-        $stmt = $this->pdo->query("
-            SELECT 
-                o.ingame_order_id, o.freight_type, o.commodity, o.is_adr, 
-                o.weight_total, o.weight_remaining, o.revenue,
-                c1.name AS from_city, c1.id AS from_id,
-                c2.name AS to_city, c2.id AS to_id
-            FROM orders o
-            JOIN cities c1 ON o.from_city_id = c1.id
-            JOIN cities c2 ON o.to_city_id = c2.id
-            WHERE o.is_accepted = 1 AND o.is_archived = 0
-        ");
-        $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // 2. Ertrags-Marge für jeden Auftrag "on the fly" berechnen
-        foreach ($orders as &$order) {
-            $km = $this->distanceService->getDistance((int)$order['from_id'], (int)$order['to_id']);
-            $order['km'] = $km;
-            
-            // Division durch Null bei identischen Orten verhindern
-            $order['eur_per_km'] = $km > 0 ? (float)$order['revenue'] / $km : 0.0;
-        }
-        unset($order); // Referenz sichern
-
-        // 3. Absteigend sortieren (lukrativste zuerst)
-        usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
-
-        return $orders;
-    }
-}
-
-// Controller instanziieren und verarbeiten
+// Service für die Entfernungs-Matrix initialisieren
 $distanceService = new DistanceService($pdo);
-$controller = new WarehouseViewController($pdo, $distanceService);
-$rankedOrders = $controller->getRankedWarehouseOrders();
+
+// Lade alle akzeptierten Lager-Aufträge (is_accepted = 1) inkl. aufgelöster Städtenamen
+$stmt = $pdo->query("
+    SELECT 
+        o.ingame_order_id, o.freight_type, o.commodity, o.is_adr, 
+        o.weight_total, o.weight_remaining, o.revenue,
+        c1.name AS from_city, c1.id AS from_id,
+        c2.name AS to_city, c2.id AS to_id
+    FROM orders o
+    JOIN cities c1 ON o.from_city_id = c1.id
+    JOIN cities c2 ON o.to_city_id = c2.id
+    WHERE o.is_accepted = 1 AND o.is_archived = 0
+");
+$orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Berechne die Rentabilität (€/km) für jeden Auftrag
+foreach ($orders as &$order) {
+    $km = $distanceService->getDistance((int)$order['from_id'], (int)$order['to_id']);
+    $order['km'] = $km;
+    
+    // Schutz vor Division durch Null
+    $order['eur_per_km'] = $km > 0 ? $order['revenue'] / $km : 0;
+}
+unset($order);
+
+// Standard-Sortierung: Lukrativste zuerst
+usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -91,17 +44,11 @@ $rankedOrders = $controller->getRankedWarehouseOrders();
 <body>
     <?php require_once 'nav.php'; ?>
     <div class="fluid-container">
+        <h1 class="accent-text">Eigenes Lager (Angenommene Aufträge)</h1>
         
-        <!-- Header mit dem Link zum Lager-Import -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-            <h1 class="accent-text" style="margin: 0;">Eigenes Lager (Angenommene Aufträge)</h1>
-            <a href="market_warehouse.php" class="btn-primary" style="text-decoration: none; padding: 10px 20px; border-radius: 3px; background-color: #3498db; color: #ffffff;">+ Lager-Import (Angenommene Aufträge)</a>
-        </div>
-        
-        <!-- Clientseitiger Suchfilter -->
+        <!-- Filter-Eingabefeld -->
         <input type="text" id="tableFilter" class="filter-input" placeholder="Tabelle durchsuchen (z.B. Stadt, IDN, Ware)...">
         
-        <!-- Tabelle der Lagerbestände -->
         <table class="data-table" id="sortableTable">
             <thead>
                 <tr>
@@ -116,7 +63,7 @@ $rankedOrders = $controller->getRankedWarehouseOrders();
                 </tr>
             </thead>
             <tbody>
-            <?php foreach ($rankedOrders as $o): ?>
+            <?php foreach ($orders as $o): ?>
             <tr>
                 <td><?= htmlspecialchars($o['ingame_order_id'] ?? '-') ?></td>
                 <td><?= htmlspecialchars($o['from_city']) ?></td>
