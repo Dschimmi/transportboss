@@ -8,22 +8,21 @@ use Exception;
 /**
  * WarehouseParser
  *
- * Analysiert den mehrzeiligen, tabellarisch einkopierten Text aus dem eigenen Lager
- * (angenommene Aufträge) und extrahiert strukturierte Datenobjekte inklusive der Ingame-ID (IDN)
- * sowie dem Mengenfortschritt (Teilladungen).
+ * Analysiert den einzeiligen, Tabulator-getrennten Kopiertext (TSV) aus dem eigenen 
+ * Ingame-Lager und extrahiert spaltenbasiert alle relevanten Auftragsdaten rein horizontal.
  *
  * @author TransportBoss Development
- * @version 1.1.1
+ * @version 1.2.2
  */
 class WarehouseParser
 {
     /**
-     * @var \CityService Lokaler Dienst zur Auflösung von Stadtnamen in IDs (Korrektur: globaler Namespace-Indikator)
+     * @var \CityService Dienst zur Auflösung von Stadtnamen in IDs
      */
     private \CityService $cityService;
 
     /**
-     * @param \CityService $cityService Der Service zur Stadt-ID-Auflösung (Korrektur: globaler Namespace-Indikator)
+     * @param \CityService $cityService Der Service zur Stadt-ID-Auflösung
      */
     public function __construct(\CityService $cityService)
     {
@@ -31,7 +30,8 @@ class WarehouseParser
     }
 
     /**
-     * Parst den einkopierten Textblock des eigenen Lagers.
+     * Parst den einzeiligen, tabellarischen Kopiertext des eigenen Lagers.
+     * Verarbeitet den Datensatz streng horizontal pro Zeile.
      *
      * @param string $rawText Der einkopierte Text des Lagers
      * @return array Liste der extrahierten Lageraufträge mit IDN-Zuweisung
@@ -44,167 +44,122 @@ class WarehouseParser
             return [];
         }
 
-        // Zeilenweise Aufteilung des Rohtextes
+        // Text zeilenweise aufteilen (jede Zeile ist ein eigenständiger Auftrag)
         $lines = explode("\n", $rawText);
-        $cleanLines = [];
-
-        // Vorbereitung: Zeilen trimmen und Leerzeilen entfernen
-        foreach ($lines as $line) {
-            $trimmed = trim($line);
-            if ($trimmed !== '') {
-                $cleanLines[] = $trimmed;
-            }
-        }
-
         $orders = [];
-        $lineCount = count($cleanLines);
-        $i = 0;
 
-        /**
-         * Wir durchlaufen den Text zeilenweise auf der Suche nach einer Ingame-IDN oder 
-         * einem Fracht-Header, der den Beginn eines eigenen Lager-Auftrags-Blocks markiert.
-         */
-        while ($i < $lineCount) {
-            $line = $cleanLines[$i];
-
-            // Prüfen, ob die Zeile eine Ingame-IDN (z. B. "IDN10620759") enthält oder ein Fracht-Header ist
-            if ($this->isWarehouseHeader($line, $ingameId)) {
-                try {
-                    // Block-Sicherheit prüfen: Ein vollständiger Block benötigt mindestens 7 Folgezeilen
-                    if ($i + 7 >= $lineCount) {
-                        break;
-                    }
-
-                    // Falls die IDN auf einer eigenen Zeile stand und die nächste Zeile den Frachttyp enthält
-                    $headerLine = $line;
-                    $offset = 1;
-                    if ($ingameId !== '' && $this->isFreightHeaderOnly($cleanLines[$i + 1])) {
-                        $headerLine = $cleanLines[$i + 1];
-                        $offset = 2;
-                    }
-
-                    // 1. Frachttyp bestimmen und normalisieren
-                    $freightType = $this->normalizeFreightType($headerLine);
-
-                    // 2. Ware, Gefahrgut-Status und Gewicht bestimmen (z.B. "(Baustoffe) 8 / 20 t")
-                    $commodityLine = $cleanLines[$i + $offset];
-                    $isAdr = str_contains(strtolower($commodityLine), '[gefahrgut]') ? 1 : 0;
-                    
-                    // Ware extrahieren (Text in runden Klammern)
-                    $commodity = 'Unbekannt';
-                    if (preg_match('/\(([^)]+)\)/', $commodityLine, $matches)) {
-                        $commodity = trim($matches[1]);
-                    }
-
-                    // Gewicht extrahieren: Berücksichtigung von Fortschritten wie "8 / 20 t"
-                    $weightRemaining = 0;
-                    $weightTotal = 0;
-                    if (preg_match('/(\d+)\s*\/\s*(\d+)\s*t/i', $commodityLine, $matches)) {
-                        // Fraktionierter Wert gefunden: Restmenge / Gesamtmenge
-                        $weightRemaining = (int)$matches[1];
-                        $weightTotal = (int)$matches[2];
-                    } elseif (preg_match('/(\d+)\s*t/i', $commodityLine, $matches)) {
-                        // Einfacher Wert gefunden: Gesamtgewicht = Restgewicht
-                        $weightRemaining = (int)$matches[1];
-                        $weightTotal = (int)$matches[1];
-                    }
-
-                    // 3. Start- und Zielort extrahieren
-                    $fromCityName = $cleanLines[$i + $offset + 1];
-                    $toCityName = $cleanLines[$i + $offset + 2];
-
-                    // 4. Distanz auslesen
-                    $distanceLine = $cleanLines[$i + $offset + 3];
-                    $distance = 0;
-                    if (preg_match('/(\d+)\s*km/i', $distanceLine, $matches)) {
-                        $distance = (int)$matches[1];
-                    }
-
-                    // 5. Erlös auslesen (Zahlung: x,xxx.xx)
-                    $revenueLine = $cleanLines[$i + $offset + 4];
-                    $revenue = 0.00;
-                    if (preg_match('/Zahlung:\s*([\d,.]+)/i', $revenueLine, $matches)) {
-                        $rawRevenue = $matches[1];
-                        $cleanedRevenue = str_replace(',', '', $rawRevenue); // Tausenderpunkte entfernen
-                        $revenue = (float)$cleanedRevenue;
-                    }
-
-                    // 6. Städte über den CityService in IDs auflösen
-                    $fromCityId = $this->cityService->resolveId($fromCityName, true);
-                    $toCityId = $this->cityService->resolveId($toCityName, true);
-
-                    // Falls keine IDN extrahiert werden konnte, generieren wir einen Fallback-String
-                    $finalIngameId = $ingameId !== '' ? $ingameId : null;
-
-                    // Strukturiertes Lager-Auftrags-Array hinzufügen
-                    $orders[] = [
-                        'ingame_order_id' => $finalIngameId,
-                        'fingerprint' => null, // Wir identifizieren Lageraufträge primär über die IDN
-                        'freight_type' => $freightType,
-                        'commodity' => $commodity,
-                        'is_adr' => $isAdr,
-                        'weight_total' => $weightTotal,
-                        'weight_remaining' => $weightRemaining,
-                        'revenue' => $revenue,
-                        'from_city_id' => $fromCityId,
-                        'to_city_id' => $toCityId,
-                        'from_city_name' => $fromCityName,
-                        'to_city_name' => $toCityName,
-                        'is_accepted' => 1, // Fest im eigenen Lager verankert
-                        'distance_km' => $distance
-                    ];
-
-                    // Index um die verarbeitete Blockgröße weiterbewegen
-                    $i += ($offset + 7);
-                    continue;
-
-                } catch (Exception $e) {
-                    // Stabilitätssicherung: Fehlerhafte Blöcke überspringen
-                    $i++;
-                    continue;
-                }
+        foreach ($lines as $line) {
+            $row = trim($line);
+            if ($row === '') {
+                continue;
             }
-            $i++;
+
+            // Spalten per Tabulator trennen (Standard beim Kopieren)
+            $cols = explode("\t", $row);
+
+            // Fallback: Falls Leerzeichen statt Tabulatoren kopiert wurden
+            if (count($cols) < 5) {
+                $cols = preg_split('/\s{2,}/', $row);
+            }
+
+            // Ein gültiger Zeilen-Datensatz benötigt mindestens 6 Spalten (IDN, Gewicht, Typ, Start, Ziel, Erlös)
+            if (count($cols) < 6) {
+                continue;
+            }
+
+            try {
+                // Spalte 0: Ingame-ID (z. B. "IDN10667107")
+                $ingameId = str_replace(' ', '', strtoupper(trim($cols[0])));
+                if ($ingameId !== '' && !str_starts_with($ingameId, 'IDN')) {
+                    $ingameId = 'IDN' . $ingameId;
+                }
+
+                // Spalte 1: Gewicht (z. B. "1 / 1 t" oder "19 / 27 t")
+                $weightLine = trim($cols[1]);
+                $weightRemaining = 0;
+                $weightTotal = 0;
+
+                if (preg_match('/(\d+)\s*\/\s*(\d+)\s*t/i', $weightLine, $matches)) {
+                    $weightRemaining = (int)$matches[1];
+                    $weightTotal = (int)$matches[2];
+                } elseif (preg_match('/(\d+)\s*t/i', $weightLine, $matches)) {
+                    $weightRemaining = (int)$matches[1];
+                    $weightTotal = (int)$matches[1];
+                }
+
+                // Spalte 2: Frachttyp & Ware (z. B. "Kurier (Direktzustellung)")
+                $freightLine = trim($cols[2]);
+                $isAdr = str_contains(strtolower($freightLine), '[gefahrgut]') ? 1 : 0;
+                
+                $commodity = 'Unbekannt';
+                if (preg_match('/\(([^)]+)\)/', $freightLine, $matches)) {
+                    $commodity = trim($matches[1]);
+                }
+
+                // Fracht-Header isolieren und normalisieren
+                $rawFreightType = trim(preg_replace('/\s*\([^)]+\)/', '', $freightLine));
+                $freightType = $this->normalizeFreightType($rawFreightType);
+
+                // Spalte 3: Startort (z. B. "Deutschland Halle")
+                $rawFromCity = trim($cols[3]);
+                $fromCityName = $this->cleanCountryPrefix($rawFromCity);
+
+                // Spalte 4: Zielort (z. B. "Deutschland Wiesbaden")
+                $rawToCity = trim($cols[4]);
+                $toCityName = $this->cleanCountryPrefix($rawToCity);
+
+                // Spalte 5: Erlös (z. B. "1,070.23")
+                $rawRevenue = trim($cols[5]);
+                // Stufe 1 & 2 der Geldlogik
+                $cleanedRevenue = str_replace(',', '', $rawRevenue);
+                $cleanedRevenue = preg_replace('/[^\d.]/', '', $cleanedRevenue);
+                $revenue = (float)$cleanedRevenue;
+
+                // Städte über den CityService auflösen (PH 3.2.1.3)
+                $fromCityId = $this->cityService->resolveId($fromCityName, true);
+                $toCityId = $this->cityService->resolveId($toCityName, true);
+
+                $orders[] = [
+                    'ingame_order_id' => $ingameId,
+                    'fingerprint' => null, // Identifikation erfolgt über die IDN
+                    'freight_type' => $freightType,
+                    'commodity' => $commodity,
+                    'is_adr' => $isAdr,
+                    'weight_total' => $weightTotal,
+                    'weight_remaining' => $weightRemaining,
+                    'revenue' => $revenue,
+                    'from_city_id' => $fromCityId,
+                    'to_city_id' => $toCityId,
+                    'from_city_name' => $fromCityName,
+                    'to_city_name' => $toCityName,
+                    'is_accepted' => 1,
+                    'distance_km' => 0 // Wird in den Sichten live berechnet
+                ];
+
+            } catch (Exception $e) {
+                // Bei Fehlern Zeile überspringen
+                continue;
+            }
         }
 
         return $orders;
     }
 
     /**
-     * Erkennt, ob eine Zeile den Start eines Lager-Frachtblocks bildet und extrahiert ggf. die IDN.
+     * Schneidet Länderpräfixe ab.
      */
-    private function isWarehouseHeader(string $line, string &$ingameId): bool
+    private function cleanCountryPrefix(string $cityName): string
     {
-        $ingameId = '';
-        // Sucht nach Mustern wie IDN10620759 oder rein numerischen IDNs (Lager-Format)
-        if (preg_match('/(IDN\s*\d+|\b\d{8,}\b)/i', $line, $matches)) {
-            $ingameId = str_replace(' ', '', strtoupper($matches[1]));
-            return true;
-        }
-        return $this->isFreightHeaderOnly($line);
-    }
-
-    /**
-     * Prüft rein auf das Vorhandensein eines bekannten Fracht-Keywords.
-     */
-    private function isFreightHeaderOnly(string $line): bool
-    {
-        $headers = [
-            'silotransport', 'silo', 'flüssigkeit', 'flüssigkeiten', 'kühlwaren', 
-            'schüttgutt', 'schüttgut', 'kurier', 'pritsche', 'iso-container', 
-            'schwertransport', 'koffer', 'kofferwagen', 'plane', 'stückgut'
+        $prefixes = [
+            'Deutschland ', 'Österreich ', 'Schweiz ', 'Niederlande ', 
+            'Belgien ', 'Luxemburg ', 'Dänemark ', 'Polen ', 
+            'Tschechien ', 'Frankreich '
         ];
-        $lowerLine = strtolower($line);
-        foreach ($headers as $header) {
-            if (str_contains($lowerLine, $header)) {
-                return true;
-            }
-        }
-        return false;
+        return trim(str_replace($prefixes, '', $cityName));
     }
 
     /**
-     * Normalisiert den einkopierten Frachttyp auf die standardisierte LKW-Kategorie.
+     * Normalisiert den einkopierten Frachttyp.
      */
     private function normalizeFreightType(string $rawType): string
     {

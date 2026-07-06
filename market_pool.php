@@ -9,7 +9,7 @@ declare(strict_types=1);
  * über inhaltliche Fingerprints ab und archiviert veraltete Angebote automatisch.
  *
  * @author TransportBoss Development
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 // Zentrale Abhängigkeiten laden
@@ -62,7 +62,7 @@ class MarketPoolController
             $cityService = new CityService($this->pdo);
             $parser = new OrderParser($cityService);
             
-            // Text über die Parser-Klasse einlesen
+            // Text über die Parser-Klasse einlesen (Korrektur: Namespaced-Instanziierung)
             $parsedOrders = $parser->parse($rawData, false);
 
             if (empty($parsedOrders)) {
@@ -118,8 +118,9 @@ class MarketPoolController
                 UPDATE orders 
                 SET is_archived = 1, completed_at = NOW() 
                 WHERE is_accepted = 0 
-                  AND is_archived = 0 
-                  AND last_seen_at < :start_time
+                AND is_archived = 0 
+                AND assigned_truck_id IS NULL
+                AND last_seen_at < :start_time
             ");
             $stmtArchive->execute(['start_time' => $importStartTime]);
             $archivedCount = $stmtArchive->rowCount();
@@ -172,47 +173,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
         
         <?php if ($viewData['message']): ?>
             <div class="feedback-msg <?= $viewData['messageClass'] ?>"><?= $viewData['message'] ?></div>
-            
-            <!-- Kontroll-Tabelle der eingelesenen Frachten -->
-            <?php if (!empty($viewData['parsed']) && $viewData['messageClass'] === 'status-success'): ?>
-                <div style="margin-bottom: 25px; overflow-x: auto;">
-                    <h3 class="accent-text" style="font-size: 1em; margin-bottom: 10px;">Kontrollübersicht: Importierte Börsendaten</h3>
-                    <table class="data-table" style="font-size: 0.85em; white-space: nowrap;">
-                        <thead>
-                            <tr>
-                                <th>Frachttyp</th>
-                                <th>Ware</th>
-                                <th>ADR</th>
-                                <th>Gewicht</th>
-                                <th>Erlös</th>
-                                <th>Distanz</th>
-                                <th>Route</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($viewData['parsed'] as $item): ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($item['freight_type']) ?></td>
-                                    <td><?= htmlspecialchars($item['commodity']) ?></td>
-                                    <td><?= $item['is_adr'] ? 'Ja' : 'Nein' ?></td>
-                                    <td><?= $item['weight_total'] ?> t</td>
-                                    <td><?= number_format((float)$item['revenue'], 2, ',', '.') ?> €</td>
-                                    <td><?= $item['distance_km'] ?> km</td>
-                                    <td><?= htmlspecialchars($item['from_city_name']) ?> ➔ <?= htmlspecialchars($item['to_city_name']) ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
         <?php endif; ?>
         
-        <!-- Eingabeformular -->
+        <!-- Eingabeformular (Jetzt ganz oben über der Tabelle platziert) -->
         <form method="post" action="market_pool.php">
             <label for="import_data">Rohtext aus der Ingame-Frachtbörse (Kopierter Auftragspool) einfügen:</label><br>
             <textarea id="import_data" name="import_data" class="import-textarea" required></textarea><br>
             <button type="submit" class="btn-primary">Börsen-Angebote importieren</button>
         </form>
+
+        <?php if (!empty($viewData['parsed']) && $viewData['messageClass'] === 'status-success'): ?>
+            <hr class="section-divider">
+
+            <!-- Kontroll-Tabelle der eingelesenen Frachten -->
+            <div style="margin-bottom: 25px; overflow-x: auto;">
+                <h3 class="accent-text" style="font-size: 1.1em; margin-bottom: 10px;">Kontrollübersicht: Importierte Börsendaten</h3>
+                
+                <!-- Multisearch Filter-Feld -->
+                <input type="text" id="tableFilter" class="filter-input" placeholder="Tabelle durchsuchen (z.B. Stadt, Ware, ADR; mehrere Keywords möglich)...">
+                
+                <table class="data-table" id="sortableTable" style="font-size: 0.85em; white-space: nowrap;">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0, 'string')">Frachttyp ⇕</th>
+                            <th onclick="sortTable(1, 'string')">Ware ⇕</th>
+                            <th onclick="sortTable(2, 'string')">ADR ⇕</th>
+                            <th onclick="sortTable(3, 'number')">Gewicht ⇕</th>
+                            <th onclick="sortTable(4, 'number')">Erlös ⇕</th>
+                            <th onclick="sortTable(5, 'number')">Distanz ⇕</th>
+                            <th onclick="sortTable(6, 'string')">Route ⇕</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($viewData['parsed'] as $item): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($item['freight_type']) ?></td>
+                                <td><?= htmlspecialchars($item['commodity']) ?></td>
+                                <td><?= $item['is_adr'] ? 'Ja' : 'Nein' ?></td>
+                                <td><?= $item['weight_total'] ?> t</td>
+                                <td><?= number_format((float)$item['revenue'], 2, ',', '.') ?> €</td>
+                                <td><?= $item['distance_km'] ?> km</td>
+                                <td><?= htmlspecialchars($item['from_city_name']) ?> ➔ <?= htmlspecialchars($item['to_city_name']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
     </div>
+
+    <!-- Client-Side Filter (Multisearch) & Sort Logik -->
+    <script>
+        // --- Multisearch Filter-Logik (UND-Verknüpfung mehrerer Wörter) ---
+        document.getElementById('tableFilter').addEventListener('keyup', function() {
+            let filter = this.value.toLowerCase();
+            let rows = document.querySelectorAll('#sortableTable tbody tr');
+            let keywords = filter.split(/\s+/).filter(k => k.trim() !== '');
+            
+            rows.forEach(row => {
+                let text = row.textContent.toLowerCase();
+                let match = true;
+                
+                // Prüfe, ob jedes einzelne Suchwort in der Zeile enthalten ist
+                for (let kw of keywords) {
+                    if (!text.includes(kw)) {
+                        match = false;
+                        break;
+                    }
+                }
+                row.style.display = match ? '' : 'none';
+            });
+        });
+
+        // --- Sortier-Logik ---
+        let sortDirections = [false, false, false, false, false, false, false]; 
+
+        function sortTable(columnIndex, type) {
+            let table = document.getElementById("sortableTable");
+            let tbody = table.querySelector("tbody");
+            let rows = Array.from(tbody.querySelectorAll("tr"));
+            
+            let dir = !sortDirections[columnIndex];
+            sortDirections[columnIndex] = dir;
+
+            rows.sort((a, b) => {
+                let valA = a.children[columnIndex].innerText.trim();
+                let valB = b.children[columnIndex].innerText.trim();
+
+                if (type === 'number') {
+                    valA = parseFloat(valA.replace(/[^0-9,-]+/g, '').replace(',', '.'));
+                    valB = parseFloat(valB.replace(/[^0-9,-]+/g, '').replace(',', '.'));
+                } else {
+                    valA = valA.toLowerCase();
+                    valB = valB.toLowerCase();
+                }
+
+                if (valA < valB) return dir ? -1 : 1;
+                if (valA > valB) return dir ? 1 : -1;
+                return 0;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+    </script>
 </body>
 </html>

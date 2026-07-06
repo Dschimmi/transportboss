@@ -12,19 +12,19 @@ use Exception;
  * und extrahiert strukturierte Auftrags-Datenobjekte.
  *
  * @author TransportBoss Development
- * @version 1.1.0
+ * @version 1.1.1
  */
 class OrderParser
 {
     /**
-     * @var CityService Lokaler Dienst zur Auflösung von Stadtnamen in IDs
+     * @var \CityService Lokaler Dienst zur Auflösung von Stadtnamen in IDs (Korrektur: globaler Namespace-Indikator)
      */
-    private CityService $cityService;
+    private \CityService $cityService;
 
     /**
-     * @param CityService $cityService Der Service zur Stadt-ID-Auflösung
+     * @param \CityService $cityService Der Service zur Stadt-ID-Auflösung (Korrektur: globaler Namespace-Indikator)
      */
-    public function __construct(CityService $cityService)
+    public function __construct(\CityService $cityService)
     {
         $this->cityService = $cityService;
     }

@@ -18,6 +18,17 @@ $totalTrucks = count($truckRepo->getAllOwned());
 $activeTrucks = count($pdo->query("SELECT * FROM trucks WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL")->fetchAll());
 $totalDrivers = count($driverRepo->getAllEmployed());
 $totalDispatchers = count($dispatcherRepo->getAllEmployed());
+
+// 1. Gesamt-Slots berechnen: 4 + floor(Verwaltung / 10)
+$employedDispatchersList = $pdo->query("SELECT skill_val FROM dispatchers WHERE is_employed = 1")->fetchAll(PDO::FETCH_ASSOC);
+$totalSlots = 4;
+foreach ($employedDispatchersList as $disp) {
+    $totalSlots += (int)floor((int)$disp['skill_val'] / 10);
+}
+
+// 2. Belegte Slots ermitteln (nur aktive Lageraufträge, deren Rest-Tonnage > 0 ist)
+$occupiedSlots = (int)$pdo->query("SELECT COUNT(*) FROM orders WHERE is_accepted = 1 AND is_archived = 0 AND weight_remaining > 0")->fetchColumn();
+
 $openOrders = $orderRepo->getOpenOrdersCount();
 $totalRevenue = $orderRepo->getTotalRevenue();
 
@@ -53,6 +64,10 @@ $dispoTrucks = $truckRepo->getActiveForPlanning();
                 <h3 class="accent-text">Disponenten</h3>
                 <div class="kpi-value"><?= $totalDispatchers ?></div>
                 <div class="kpi-desc">Eingestellt</div>
+                <!-- Live-Anzeige des Belegungsgrades der Planungsslots -->
+                <div class="kpi-desc" style="margin-top: 5px; color: #2ecc71; font-weight: bold;">
+                    Slots: <?= $occupiedSlots ?> / <?= $totalSlots ?> belegt
+                </div>
             </div>
             <div class="dashboard-card">
                 <h3 class="accent-text">Aufträge</h3>

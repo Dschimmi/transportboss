@@ -63,9 +63,19 @@ class JobLoader
                 throw new Exception("Auftrag mit ID {$orderId} nicht gefunden.");
             }
 
+            // Sicherheits-Interlock: Prüfen, ob der Auftrag bereits vergeben wurde (PH 2.5.4)
+            if ($order['assigned_truck_id'] !== null) {
+                throw new Exception("Dieser Auftrag wurde bereits einem anderen Fahrzeug zugewiesen!");
+            }
+
             $weightRemaining = (int)$order['weight_remaining'];
             $weightTotal = (int)$order['weight_total'];
             $revenue = (float)$order['revenue'];
+
+            // Sicherheits-Interlock: Prüfen, ob überhaupt noch Tonnage übrig ist
+            if ($weightRemaining <= 0) {
+                throw new Exception("Dieser Auftrag hat keine verbleibende Tonnage mehr!");
+            }
 
             if ($weightRemaining > $capacity) {
                 // --- FALL A: SPLITTING (Teillieferung notwendig) ---
@@ -84,6 +94,16 @@ class JobLoader
                 $stmtUpdateOrig->execute([$remainingWeight, $orderId]);
 
                 // 3. Neuen Klon-Auftrag für die transportierte Teilladung anlegen und dem LKW zuweisen
+                // Erzeuge eine eindeutige IDN für das Teilstück, um Unique-Sperren zu umgehen (z.B. IDN10645786-1)
+                $splitIdn = null;
+                if ($order['ingame_order_id']) {
+                    $stmtCount = $this->pdo->prepare("SELECT COUNT(*) FROM orders WHERE ingame_order_id LIKE ?");
+                    $stmtCount->execute([$order['ingame_order_id'] . '%']);
+                    $splitCount = (int)$stmtCount->fetchColumn();
+                    // Der Klon erhält das Suffix "-1", "-2" etc.
+                    $splitIdn = $order['ingame_order_id'] . '-' . $splitCount;
+                }
+
                 $stmtInsertSplit = $this->pdo->prepare("
                     INSERT INTO orders (
                         ingame_order_id, fingerprint, freight_type, commodity, is_adr, 
@@ -92,11 +112,11 @@ class JobLoader
                     ) VALUES (
                         :idn, :fingerprint, :freight_type, :commodity, :is_adr, 
                         :weight_total, :weight_remaining, :revenue, :from_city_id, :to_city_id, 
-                        1, 0, :assigned_truck_id, NOW(), NOW()
+                        :is_accepted, 0, :assigned_truck_id, NOW(), NOW()
                     )
                 ");
                 $stmtInsertSplit->execute([
-                    'idn' => $order['ingame_order_id'],
+                    'idn' => $splitIdn,
                     'fingerprint' => $order['fingerprint'],
                     'freight_type' => $order['freight_type'],
                     'commodity' => $order['commodity'],
@@ -106,6 +126,7 @@ class JobLoader
                     'revenue' => $proportionalRevenue,
                     'from_city_id' => $order['from_city_id'],
                     'to_city_id' => $order['to_city_id'],
+                    'is_accepted' => (int)$order['is_accepted'],
                     'assigned_truck_id' => $truckId
                 ]);
 
@@ -115,7 +136,6 @@ class JobLoader
                     UPDATE orders 
                     SET assigned_truck_id = ?, 
                         assigned_at = NOW(), 
-                        is_accepted = 1,
                         last_seen_at = NOW() 
                     WHERE id = ?
                 ");

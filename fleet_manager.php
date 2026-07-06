@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Basis-Daten laden
 $allDrivers = $driverRepo->getAllEmployed();
-$allTrucks = $truckRepo->getAllOwned();
+$allTrucks = $pdo->query("SELECT * FROM trucks ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
 $allCities = $pdo->query("SELECT id, name FROM cities ORDER BY name ASC")->fetchAll(PDO::FETCH_ASSOC);
 
 // Daten für die UI sortieren (Unvollständige oben)
