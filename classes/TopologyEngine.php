@@ -141,50 +141,108 @@ class TopologyEngine
     }
 
     /**
-     * Prüft, ob ein Frachttyp mit einem Fahrzeugtyp kompatibel ist.
+     * Prüft, ob ein Frachttyp mit einem Fahrzeugtyp kompatibel ist (PH 3.3 Matrix-Abgleich).
      */
     private function isTypeCompatible(string $freightType, string $vehicleType): bool
     {
-        if ($freightType === $vehicleType) {
+        $normalize = function(string $type): string {
+            $lower = strtolower($type);
+            if (str_contains($lower, 'silo')) return 'Silo';
+            if (str_contains($lower, 'flüssig') || str_contains($lower, 'tank')) return 'Tankwagen';
+            if (str_contains($lower, 'kühl')) return 'Kühlwagen';
+            if (str_contains($lower, 'schütt')) return 'Schüttgut';
+            if (str_contains($lower, 'kurier')) return 'Kurier';
+            if (str_contains($lower, 'pritsche')) return 'Pritsche';
+            if (str_contains($lower, 'iso')) return 'ISO-Container';
+            if (str_contains($lower, 'schwer')) return 'Schwertransport';
+            if (str_contains($lower, 'koffer')) return 'Koffer';
+            if (str_contains($lower, 'plane')) return 'Plane';
+            if (str_contains($lower, 'stück')) return 'Stückgut';
+            return $type;
+        };
+
+        $fType = $normalize($freightType);
+        $vType = $normalize($vehicleType);
+
+        if ($vType === $fType) {
             return true;
         }
 
-        // Mapping von Frachttyp (aus dem Spiel) -> Fahrzeugtyp (aus trucks.vehicle_type)
-        $mapping = [
-            'Plane(Wetterschutz)' => 'Plane',
-            'Kühlwaren'            => 'Kühlwagen',
-            'Kofferwagen'          => 'Koffer',
-            'Flüssigkeiten'        => 'Tankwagen',
+        // Vollständige Kompatibilitätsmatrix aus dem Pflichtenheft (PH 3.3)
+        $matrix = [
+            'Kurier' => ['Kurier', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
+            'Stückgut' => ['Stückgut', 'Kurier', 'Pritsche', 'Plane', 'Koffer'],
+            'Schüttgut' => ['Schüttgut'],
+            'Pritsche' => ['Pritsche', 'Schüttgut'],
+            'Plane' => ['Plane', 'Stückgut', 'Pritsche'],
+            'Koffer' => ['Koffer', 'Stückgut', 'Pritsche', 'Plane'],
+            'Kühlwagen' => ['Kühlwagen', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
+            'Silo' => ['Silo'],
+            'Tankwagen' => ['Tankwagen'],
+            'Schwertransport' => ['Schwertransport'],
+            'ISO-Container' => ['ISO-Container'],
+            'Super-Liner' => ['Super-Liner', 'Stückgut', 'Pritsche', 'Plane', 'Koffer']
         ];
 
-        if (isset($mapping[$freightType])) {
-            return $mapping[$freightType] === $vehicleType;
-        }
-
-        return false;
+        return in_array($fType, $matrix[$vType] ?? [], true);
     }
 
     /**
-     * Gibt alle kompatiblen Frachttypen für einen Fahrzeugtyp zurück.
+     * Gibt alle kompatiblen Frachttypen für einen Fahrzeugtyp nach PH 3.3 zurück.
      */
     private function getCompatibleFreightTypes(string $vehicleType): array
     {
-        $types = [$vehicleType];
-        switch ($vehicleType) {
-            case 'Plane':
-                $types[] = 'Plane(Wetterschutz)';
-                break;
-            case 'Kühlwagen':
-                $types[] = 'Kühlwaren';
-                break;
-            case 'Koffer':
-                $types[] = 'Kofferwagen';
-                break;
-            case 'Tankwagen':
-                $types[] = 'Flüssigkeiten';
-                break;
+        $normalize = function(string $type): string {
+            $lower = strtolower($type);
+            if (str_contains($lower, 'silo')) return 'Silo';
+            if (str_contains($lower, 'flüssig') || str_contains($lower, 'tank')) return 'Tankwagen';
+            if (str_contains($lower, 'kühl')) return 'Kühlwagen';
+            if (str_contains($lower, 'schütt')) return 'Schüttgut';
+            if (str_contains($lower, 'kurier')) return 'Kurier';
+            if (str_contains($lower, 'pritsche')) return 'Pritsche';
+            if (str_contains($lower, 'iso')) return 'ISO-Container';
+            if (str_contains($lower, 'schwer')) return 'Schwertransport';
+            if (str_contains($lower, 'koffer')) return 'Koffer';
+            if (str_contains($lower, 'plane')) return 'Plane';
+            if (str_contains($lower, 'stück')) return 'Stückgut';
+            return $type;
+        };
+
+        $vType = $normalize($vehicleType);
+        
+        $matrix = [
+            'Kurier' => ['Kurier', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
+            'Stückgut' => ['Stückgut', 'Kurier', 'Pritsche', 'Plane', 'Koffer'],
+            'Schüttgut' => ['Schüttgut'],
+            'Pritsche' => ['Pritsche', 'Schüttgut'],
+            'Plane' => ['Plane', 'Stückgut', 'Pritsche'],
+            'Koffer' => ['Koffer', 'Stückgut', 'Pritsche', 'Plane'],
+            'Kühlwagen' => ['Kühlwagen', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
+            'Silo' => ['Silo'],
+            'Tankwagen' => ['Tankwagen'],
+            'Schwertransport' => ['Schwertransport'],
+            'ISO-Container' => ['ISO-Container'],
+            'Super-Liner' => ['Super-Liner', 'Stückgut', 'Pritsche', 'Plane', 'Koffer']
+        ];
+
+        $compatibleNormalized = $matrix[$vType] ?? [$vType];
+        
+        // Expansion auf Ingame-Synonyme zur präzisen Abdeckung in SQL
+        $allPossibleTypes = [];
+        foreach ($compatibleNormalized as $norm) {
+            $allPossibleTypes[] = $norm;
+            if ($norm === 'Plane') {
+                $allPossibleTypes[] = 'Plane(Wetterschutz)';
+            } elseif ($norm === 'Kühlwagen') {
+                $allPossibleTypes[] = 'Kühlwaren';
+            } elseif ($norm === 'Koffer') {
+                $allPossibleTypes[] = 'Kofferwagen';
+            } elseif ($norm === 'Tankwagen') {
+                $allPossibleTypes[] = 'Flüssigkeiten';
+            }
         }
-        return $types;
+        
+        return array_unique($allPossibleTypes);
     }
 
     /**
@@ -207,7 +265,7 @@ class TopologyEngine
     }
 
     /**
-     * Prüft, ob freie Slots für Marktaufträge verfügbar sind.
+     * Prüft, ob freie Slots für Marktaufträge verfügbar sind (resistent gegen Splitting-Doubletten).
      *
      * @return bool
      */
@@ -218,13 +276,29 @@ class TopologyEngine
         if ($globalLimit <= 0) {
             $globalLimit = 26;
         }
-        $stmt = $this->pdo->query("SELECT COUNT(*) AS count FROM orders WHERE is_accepted = 1 AND is_archived = 0");
+
+        // Ermittelt die real belegten Slots (zusammengefasste Ingame-IDs ohne Split-Suffixes)
+        $stmt = $this->pdo->query("
+            SELECT (
+                SELECT COUNT(DISTINCT SUBSTRING_INDEX(ingame_order_id, '-', 1))
+                FROM orders
+                WHERE is_archived = 0
+                  AND ingame_order_id IS NOT NULL
+                  AND (is_accepted = 1 OR assigned_truck_id IS NOT NULL)
+            ) + (
+                SELECT COUNT(*)
+                FROM orders
+                WHERE is_archived = 0
+                  AND ingame_order_id IS NULL
+                  AND assigned_truck_id IS NOT NULL
+            ) AS count
+        ");
         $usedSlots = (int)$stmt->fetch(PDO::FETCH_ASSOC)['count'];
         return ($globalLimit - $usedSlots) > 0;
     }
 
     /**
-     * Führt einen globalen Scan durch, falls die 3-Städte-Regel keine Ergebnisse liefert.
+     * Führt einen auf PH 3.3 basierenden globalen Scan durch, falls die 3-Städte-Regel keine Ergebnisse liefert.
      *
      * @param int $truckId Die Fahrzeug-ID
      * @param string $vehicleType Der Fahrzeugtyp

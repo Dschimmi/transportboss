@@ -11,7 +11,7 @@ declare(strict_types=1);
  * - Rechts: Geteilter Detail-Arbeitsbereich (Oben: Aktive Tour / unten: Vorschlagskette)
  *
  * @author TransportBoss Development
- * @version 2.0.0
+ * @version 2.0.3
  */
 
 require_once 'db_connect.php';
@@ -297,7 +297,23 @@ foreach ($rawOrders as $ro) {
     ];
 }
 
-$warehouseCount = (int)$pdo->query("SELECT COUNT(*) FROM orders WHERE is_accepted = 1 AND is_archived = 0")->fetchColumn();
+// KORREKTUR: Slot-Zählung dublettenbereinigt ausführen (Splittings ignorieren)
+$warehouseCount = (int)$pdo->query("
+    SELECT (
+        SELECT COUNT(DISTINCT SUBSTRING_INDEX(ingame_order_id, '-', 1))
+        FROM orders
+        WHERE is_archived = 0
+          AND ingame_order_id IS NOT NULL
+          AND (is_accepted = 1 OR assigned_truck_id IS NOT NULL)
+    ) + (
+        SELECT COUNT(*)
+        FROM orders
+        WHERE is_archived = 0
+          AND ingame_order_id IS NULL
+          AND assigned_truck_id IS NOT NULL
+    )
+")->fetchColumn();
+
 $freeMarketSlots = max(0, $maxDispoSlots - $warehouseCount);
 $marketOrdersCount = 0;
 $maxRounds = 6;
@@ -433,87 +449,6 @@ if ($focusTruckId) {
     <meta charset="UTF-8">
     <title>Dispatcher Board - TransportBoss</title>
     <link rel="stylesheet" href="main.css">
-    <style>
-        /* Spezifisches 3-Spalten Workspace-Design (PH 1.4.2) */
-        .board-layout {
-            display: flex;
-            gap: 15px;
-            height: calc(100vh - 120px);
-            overflow: hidden;
-        }
-        .board-sidebar {
-            width: 250px;
-            background-color: #1e1e1e;
-            border-right: 1px solid #333;
-            overflow-y: auto;
-            padding-right: 5px;
-        }
-        .board-middle {
-            width: 320px;
-            background-color: #1e1e1e;
-            border-right: 1px solid #333;
-            overflow-y: auto;
-            padding: 0 5px;
-        }
-        .board-right-workspace {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            overflow-y: auto;
-            padding-left: 5px;
-        }
-        .detail-top-half, .detail-bottom-half {
-            flex: 1;
-            background-color: #252525;
-            border: 1px solid #444;
-            border-radius: 5px;
-            padding: 15px;
-            overflow-y: auto;
-            box-sizing: border-box;
-        }
-        /* Kompakte, zweizeilige LKW-Auswahlbuttons (Mitte) */
-        .truck-btn {
-            background-color: #252525;
-            border: 1px solid #444;
-            border-radius: 4px;
-            padding: 8px 12px;
-            margin-bottom: 8px;
-            cursor: pointer;
-            transition: all 0.15s ease-in-out;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .truck-btn:hover {
-            background-color: #2d2d2d;
-            border-color: #555;
-        }
-        .truck-btn-active {
-            border-left: 4px solid #27ae60;
-        }
-        .truck-btn-inactive {
-            opacity: 0.65;
-        }
-        .truck-btn-focussed {
-            border-color: #f39c12;
-            box-shadow: 0 0 8px rgba(243, 156, 18, 0.25);
-            background-color: #2d2d2d;
-        }
-        .btn-row-1, .btn-row-2 {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .btn-row-1 {
-            font-size: 0.9em;
-            font-weight: 600;
-        }
-        .btn-row-2 {
-            font-size: 0.8em;
-            color: #aaaaaa;
-        }
-    </style>
 </head>
 <body>
     <?php require_once 'nav.php'; ?>
@@ -523,9 +458,9 @@ if ($focusTruckId) {
             
             <!-- SPALTE 1 (LINKS): Sidebar (Strategic Monitor) -->
             <div class="board-sidebar">
-                <h2 class="accent-text" style="font-size: 1.2em; margin-bottom: 10px;">Strategie-Monitor</h2>
-                <input type="text" id="cityFilter" class="filter-input" placeholder="Städte filtern (Multisearch)..." style="margin-bottom: 10px; padding: 6px;">
-                <table class="data-table" id="sidebarTable" style="font-size: 0.85em;">
+                <h2 class="accent-text sidebar-title">Strategie-Monitor</h2>
+                <input type="text" id="cityFilter" class="filter-input city-filter-input" placeholder="Städte filtern (Multisearch)...">
+                <table class="data-table sidebar-table" id="sidebarTable">
                     <thead>
                         <tr>
                             <th>Stadt</th>
@@ -542,7 +477,7 @@ if ($focusTruckId) {
                                     <?php if ($city['total_weight'] > 0): ?>
                                         <?= number_format((float)$city['total_weight'], 0, ',', '.') ?> t
                                     <?php else: ?>
-                                        <small style="color: #e74c3c; font-weight: bold;">FEHLT</small>
+                                        <span class="badge-missing">FEHLT</span>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -553,40 +488,37 @@ if ($focusTruckId) {
 
             <!-- SPALTE 2 (MITTE): Kompakte LKW-Auswahlbuttons -->
             <div class="board-middle">
-                <h2 class="accent-text" style="font-size: 1.2em; margin-bottom: 10px;">Fuhrpark</h2>
+                <h2 class="accent-text sidebar-title">Fuhrpark</h2>
                 
                 <?php foreach ($allTrucks as $truck): ?>
                 <?php 
                 $truckSuggestions = $suggestedChains[$truck['id']] ?? [];
                 
-                // Bestimme Warnfarbe bei vollständiger Inkompatibilität
+                // Bestimme Warnzustand bei vollständiger Inkompatibilität
                 $isAlert = false;
                 if ((int)$truck['is_active_planning'] === 1 && empty($truckSuggestions)) {
                     $isAlert = true;
                 }
                 $isFocussed = ($truck['id'] == $focusTruckId);
                 $driver = $driverMap[$truck['assigned_driver_id']] ?? null;
-                
-                $alertStyle = $isAlert ? 'border: 2px solid #e74c3c; box-shadow: 0 0 10px rgba(231, 76, 60, 0.3); background-color: rgba(231, 76, 60, 0.05);' : '';
                 ?>
-                <!-- Zweizeiliger kompakter LKW-Button -->
+                <!-- Zweizeiliger kompakter LKW-Button (Dynamische Zustände via Klassen abgebildet) -->
                 <div id="truck-<?= $truck['id'] ?>"
-                     class="truck-btn <?= $truck['is_active_planning'] ? 'truck-btn-active' : 'truck-btn-inactive' ?> <?= $isFocussed ? 'truck-btn-focussed' : '' ?>" 
-                     onclick="selectTruck(<?= $truck['id'] ?>)"
-                     style="<?= $alertStyle ?>">
+                     class="truck-btn <?= $truck['is_active_planning'] ? 'truck-btn-active' : 'truck-btn-inactive' ?> <?= $isFocussed ? 'truck-btn-focussed' : '' ?> <?= $isAlert ? 'truck-btn-alert' : '' ?>" 
+                     onclick="selectTruck(<?= $truck['id'] ?>)">
                     
                     <!-- Reihe 1: Aktiv-Checkbox, Typ & Kapazität, geplante Jobs -->
                     <div class="btn-row-1">
-                        <div style="display: flex; align-items: center; gap: 5px;">
-                            <form method="post" style="display: inline;" onclick="event.stopPropagation();">
+                        <div class="truck-btn-header-left">
+                            <form method="post" class="checkbox-planning-form" onclick="event.stopPropagation();">
                                 <input type="hidden" name="action" value="toggle_planning">
                                 <input type="hidden" name="truck_id" value="<?= $truck['id'] ?>">
                                 <input type="hidden" name="state" value="<?= $truck['is_active_planning'] ? 0 : 1 ?>">
-                                <input type="checkbox" <?= $truck['is_active_planning'] ? 'checked' : '' ?> onchange="this.form.submit()" style="margin: 0; cursor: pointer;">
+                                <input type="checkbox" <?= $truck['is_active_planning'] ? 'checked' : '' ?> onchange="this.form.submit()" class="checkbox-planning">
                             </form>
                             <span><?= htmlspecialchars($truck['vehicle_type']) ?> (<?= $truck['capacity_t'] ?>t)</span>
                         </div>
-                        <span class="badge-jobs" style="color: #f39c12; font-weight: bold;"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
                     </div>
 
                     <!-- Reihe 2: Fahrername, ADR & virtuelles Tourende -->
@@ -594,9 +526,9 @@ if ($focusTruckId) {
                         <div>
                             <?php if ($driver): ?>
                                 <span><?= htmlspecialchars($driver['last_name'] . ', ' . substr($driver['first_name'], 0, 1) . '.') ?></span>
-                                <?= $driver['adr_permit'] ? '<span class="adr-badge" style="color: #e74c3c; font-weight: bold; font-size: 0.85em;">[ADR]</span>' : '' ?>
+                                <?= $driver['adr_permit'] ? '<span class="adr-badge">[ADR]</span>' : '' ?>
                             <?php else: ?>
-                                <span class="text-warning" style="color: #e74c3c; font-style: italic;">Unbesetzt</span>
+                                <span class="driver-unassigned">Unbesetzt</span>
                             <?php endif; ?>
                         </div>
                         <div>
@@ -604,10 +536,10 @@ if ($focusTruckId) {
                             $lastOrder = $orderRepo->getLastOrderForTruck((int)$truck['id']);
                             if ($lastOrder) {
                                 $tourEndCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$lastOrder['to_city_id'])->fetchColumn();
-                                echo '<span class="text-orange" style="color: #f39c12;">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
+                                echo '<span class="text-tour-end">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
                             } else {
                                 $currentCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$truck['current_city_id'])->fetchColumn();
-                                echo '<span class="text-blue" style="color: #3498db;">➔ POS: ' . htmlspecialchars($currentCity) . '</span>';
+                                echo '<span class="text-pos">➔ POS: ' . htmlspecialchars($currentCity) . '</span>';
                             }
                             ?>
                         </div>
@@ -622,24 +554,23 @@ if ($focusTruckId) {
                     
                     <!-- OBERE HÄLFTE: Geplante Tour -->
                     <div class="detail-top-half" onclick="event.stopPropagation();">
-                        <h3 class="accent-text" style="margin-top: 0; margin-bottom: 10px;">
+                        <h3 class="accent-text workspace-title">
                             Geplante Tour für LKW ID: <?= htmlspecialchars($focusTruck['ingame_vehicle_id']) ?> (<?= htmlspecialchars($focusTruck['vehicle_type']) ?>)
                         </h3>
                         <table class="suggestion-table" style="font-size: 0.85em;">
                             <thead>
                                 <tr>
-                                    <th>Erledigt?</th> <!-- GANZ LINKS -->
+                                    <th>Erledigt?</th>
                                     <th>Typ</th>
                                     <th>Route</th>
                                     <th>Distanz</th>
                                     <th>Tonnage</th>
                                     <th>Erlös</th>
-                                    <th>Aktionen</th> <!-- GANZ RECHTS -->
+                                    <th>Aktionen</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php
-                                // Korrektur: Nutzt nun die korrekte Fokus-Variable $focusTruck
                                 $assignedOrders = $pdo->query("
                                     SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
                                     FROM orders o
@@ -662,9 +593,9 @@ if ($focusTruckId) {
                                         if ($orderFromId !== $currentCityId) {
                                             $emptyDistance = $distanceService->getDistance($currentCityId, $orderFromId);
                                             $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn();
-                                            echo '<tr class="row-type-empty" style="opacity: 0.65; background-color: rgba(231, 76, 60, 0.05);">
+                                            echo '<tr class="row-type-empty">
                                                 <td></td>
-                                                <td style="color: #e74c3c; font-weight: bold;">LEERFAHRT</td>
+                                                <td class="text-warning-bold">LEERFAHRT</td>
                                                 <td>' . htmlspecialchars($fromCityName) . ' ➔ ' . htmlspecialchars($order['from_city_name']) . '</td>
                                                 <td>' . $emptyDistance . ' km</td>
                                                 <td>-</td>
@@ -677,29 +608,29 @@ if ($focusTruckId) {
                                         // Cargo-Berechnung "on the fly" mit echtem LAGER/BÖRSE Status
                                         $jobDistance = $distanceService->getDistance($orderFromId, $orderToId);
                                         $jobTypeLabel = ((int)$order['is_accepted'] === 1) ? 'LAGER' : 'BÖRSE';
-                                        $jobTypeColor = ((int)$order['is_accepted'] === 1) ? '#3498db' : '#e67e22';
+                                        $jobTypeColor = ((int)$order['is_accepted'] === 1) ? 'text-lager' : 'text-market';
 
-                                        echo '<tr class="row-type-cargo" style="background-color: rgba(46, 204, 113, 0.05);">
+                                        echo '<tr class="row-type-cargo">
                                             <td>
                                                 <!-- Abgearbeitet-Button ganz links zur Vermeidung von Fehlklicks -->
-                                                <form method="post" style="display:inline;">
+                                                <form method="post" class="inline-form">
                                                     <input type="hidden" name="action" value="complete_job">
                                                     <input type="hidden" name="order_id" value="' . $order['id'] . '">
                                                     <input type="hidden" name="truck_id" value="' . $focusTruck['id'] . '">
-                                                    <button type="submit" class="btn-primary" style="background-color: #27ae60; padding: 4px 8px; font-size: 0.85em; border-radius:3px; border:none; cursor:pointer;">Erledigt</button>
+                                                    <button type="submit" class="btn-primary btn-complete">Erledigt</button>
                                                 </form>
                                             </td>
-                                            <td style="color: ' . $jobTypeColor . '; font-weight: bold;">' . $jobTypeLabel . '</td>
+                                            <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
                                             <td>' . htmlspecialchars($order['from_city_name']) . ' ➔ ' . htmlspecialchars($order['to_city_name']) . '</td>
                                             <td>' . $jobDistance . ' km</td>
                                             <td>' . $order['weight_total'] . ' t</td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
                                                 <!-- Entladen-Button ganz rechts -->
-                                                <form method="post" style="display:inline;" onsubmit="return confirm(\'Auftrag wirklich entladen?\')">
+                                                <form method="post" class="inline-form" onsubmit="return confirm(\'Auftrag wirklich entladen?\')">
                                                     <input type="hidden" name="action" value="unload_job">
                                                     <input type="hidden" name="order_id" value="' . $order['id'] . '">
-                                                    <button type="submit" class="btn-primary btn-danger" style="padding: 4px 8px; font-size: 0.85em; border-radius:3px; border:none; cursor:pointer;">Entladen</button>
+                                                    <button type="submit" class="btn-primary btn-danger btn-unload">Entladen</button>
                                                 </form>
                                             </td>
                                         </tr>';
@@ -713,14 +644,14 @@ if ($focusTruckId) {
 
                     <!-- UNTERE HÄLFTE: Vorschlagskette (Tagesplanung) -->
                     <div class="detail-bottom-half" onclick="event.stopPropagation();">
-                        <h3 class="accent-text" style="margin-top: 0; margin-bottom: 10px;">
+                        <h3 class="accent-text workspace-title">
                             Vorschlagskette für dieses Fahrzeug (Tagesplanung)
                         </h3>
                         <?php 
                         $focusSuggestions = $suggestedChains[$focusTruck['id']] ?? [];
                         if (!empty($focusSuggestions)): 
                         ?>
-                            <table class="suggestion-table" style="font-size: 0.85em;">
+                            <table class="suggestion-table workspace-table">
                                 <thead>
                                     <tr>
                                         <th>Laden?</th> <!-- GANZ LINKS -->
@@ -737,13 +668,13 @@ if ($focusTruckId) {
                                 <tbody>
                                     <?php foreach ($focusSuggestions as $suggestion): ?>
                                     <?php $order = $suggestion['order']; ?>
-                                    <tr style="<?= $suggestion['is_split'] ? 'border-left: 3px solid #f39c12;' : '' ?>">
+                                    <tr class="<?= $suggestion['is_split'] ? 'row-split-load' : '' ?>">
                                         <td>
                                             <!-- Laden-Button ganz links -->
                                             <form method="post" action="load_job.php">
                                                 <input type="hidden" name="truck_id" value="<?= $focusTruck['id'] ?>">
                                                 <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
-                                                <button type="submit" class="btn-primary" style="padding: 4px 8px; font-size: 0.85em; border-radius:3px; border:none; cursor:pointer;">Laden</button>
+                                                <button type="submit" class="btn-primary btn-load">Laden</button>
                                             </form>
                                         </td>
                                         <td><?= htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool') ?></td>
@@ -759,7 +690,7 @@ if ($focusTruckId) {
                                         <td><?= number_format((float)$order['revenue'], 2, ',', '.') ?> €</td>
                                         <td>
                                             <?= $suggestion['empty_run_dist'] ?> km
-                                            <?= $suggestion['empty_run_dist'] > 0 ? ' <small style="color:#e74c3c;">(Anfahrt)</small>' : ' <small style="color:#2ecc71;">(Direkt)</small>' ?>
+                                            <?= $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>' ?>
                                         </td>
                                         <td class="status-<?= $suggestion['status'] ?>">
                                             <?= $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE' ?>
@@ -769,7 +700,7 @@ if ($focusTruckId) {
                                             <form method="post" onsubmit="return confirm('Möchten Sie diesen Vorschlag dauerhaft ausblenden/archivieren? Nachfolgende Glieder passen dann nicht mehr.');">
                                                 <input type="hidden" name="action" value="archive_pool_order">
                                                 <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
-                                                <button type="submit" class="btn-primary" style="background-color: #7f8c8d; padding: 4px 8px; font-size: 0.85em; border-radius:3px; border:none; cursor:pointer;">Archivieren</button>
+                                                <button type="submit" class="btn-primary btn-archive-action">Archivieren</button>
                                             </form>
                                         </td>
                                     </tr>
@@ -777,8 +708,8 @@ if ($focusTruckId) {
                                 </tbody>
                             </table>
                         <?php else: ?>
-                            <div class="empty-suggestions" style="padding: 20px; text-align: center;">
-                                <span style="<?= $isAlert ? 'color:#e74c3c; font-weight:bold;' : '' ?>">
+                            <div class="empty-suggestions-container">
+                                <span class="<?= $isAlert ? 'text-alert-active' : '' ?>">
                                     <?= $isAlert ? 'ACHTUNG: Keine kompatiblen Aufträge für dieses Fahrzeug im gesamten Pool vorhanden!' : 'Keine Vorschläge für dieses Fahrzeug. Bitte aktivieren Sie den LKW für die Planung.' ?>
                                 </span>
                             </div>
@@ -787,8 +718,8 @@ if ($focusTruckId) {
                     
                 <?php else: ?>
                     <!-- Platzhalter bei leerem Fokus-Zustand -->
-                    <div style="flex: 1; display: flex; align-items: center; justify-content: center; background-color: #252525; border: 1px solid #444; border-radius: 5px;">
-                        <span class="text-muted-italic" style="font-size: 1.1em; color: #888;">Bitte wählen Sie ein Fahrzeug aus der mittleren Liste aus, um die Tourplanung zu aktivieren.</span>
+                    <div class="workspace-placeholder">
+                        <span class="text-muted-italic placeholder-text">Bitte wählen Sie ein Fahrzeug aus der mittleren Liste aus, um die Tourplanung zu aktivieren.</span>
                     </div>
                 <?php endif; ?>
             </div>
@@ -803,10 +734,10 @@ if ($focusTruckId) {
             if (window.getSelection().toString() !== '') {
                 return;
             }
-            window.location.href = 'dispatcher_board.php?focus_truck_id=' + truckId;
+            window.location.href = "dispatcher_board.php?focus_truck_id=" + truckId;
         }
 
-        // --- Multisearch Filter-Logik für die linke Sidebar (Strategic Monitor) ---
+        // --- Multisearch Filter-Logik (UND-Verknüpfung mehrerer Wörter) ---
         document.getElementById('cityFilter').addEventListener('keyup', function() {
             const filter = this.value.toLowerCase();
             const rows = document.querySelectorAll('#sidebarTable tbody tr');
@@ -826,42 +757,6 @@ if ($focusTruckId) {
                 row.style.display = match ? '' : 'none';
             });
         });
-
-        // Tourenplan ein-/ausklappen (globaler Steuerungs-Button)
-        document.getElementById('toggleAllTours').addEventListener('click', function() {
-            const containers = document.querySelectorAll('.tour-plan-container');
-            const isCollapsed = this.textContent.includes('einklappen');
-            containers.forEach(container => {
-                container.style.display = isCollapsed ? 'none' : 'block';
-            });
-            this.textContent = isCollapsed ? 'Alle Touren ausklappen' : 'Alle Touren einklappen';
-        });
-
-        // Individueller Einklapp-Button für die LKW-Tourliste
-        function toggleTourPlan(btn, id) {
-            const container = document.getElementById(id);
-            if (container.style.display === 'block') {
-                container.style.display = 'none';
-                btn.textContent = 'Tour einblenden';
-            } else {
-                container.style.display = 'block';
-                btn.textContent = 'Tour ausblenden';
-            }
-        }
-
-        // Individueller Einklapp-Button für die Vorschlagstabelle
-        function toggleSuggestions(btn, id) {
-            const container = document.getElementById(id);
-            if (container) {
-                if (container.style.display === 'none') {
-                    container.style.display = 'block';
-                    btn.textContent = 'Vorschläge ausblenden';
-                } else {
-                    container.style.display = 'none';
-                    btn.textContent = 'Vorschläge einblenden';
-                }
-            }
-        }
     </script>
 </body>
 </html>

@@ -26,8 +26,22 @@ foreach ($employedDispatchersList as $disp) {
     $totalSlots += (int)floor((int)$disp['skill_val'] / 10);
 }
 
-// 2. Belegte Slots ermitteln (nur aktive Lageraufträge, deren Rest-Tonnage > 0 ist)
-$occupiedSlots = (int)$pdo->query("SELECT COUNT(*) FROM orders WHERE is_accepted = 1 AND is_archived = 0 AND weight_remaining > 0")->fetchColumn();
+// 2. Belegte Slots ermitteln (KORREKTUR: Synchronisiert mit der splitting-resistenten Berechnungs-Formel)
+$occupiedSlots = (int)$pdo->query("
+    SELECT (
+        SELECT COUNT(DISTINCT SUBSTRING_INDEX(ingame_order_id, '-', 1))
+        FROM orders
+        WHERE is_archived = 0
+          AND ingame_order_id IS NOT NULL
+          AND (is_accepted = 1 OR assigned_truck_id IS NOT NULL)
+    ) + (
+        SELECT COUNT(*)
+        FROM orders
+        WHERE is_archived = 0
+          AND ingame_order_id IS NULL
+          AND assigned_truck_id IS NOT NULL
+    )
+")->fetchColumn();
 
 $openOrders = $orderRepo->getOpenOrdersCount();
 $totalRevenue = $orderRepo->getTotalRevenue();
@@ -64,8 +78,8 @@ $dispoTrucks = $truckRepo->getActiveForPlanning();
                 <h3 class="accent-text">Disponenten</h3>
                 <div class="kpi-value"><?= $totalDispatchers ?></div>
                 <div class="kpi-desc">Eingestellt</div>
-                <!-- Live-Anzeige des Belegungsgrades der Planungsslots -->
-                <div class="kpi-desc" style="margin-top: 5px; color: #2ecc71; font-weight: bold;">
+                <!-- Live-Anzeige des Belegungsgrades der Planungsslots (Inline-CSS bereinigt) -->
+                <div class="kpi-desc kpi-slots-indicator">
                     Slots: <?= $occupiedSlots ?> / <?= $totalSlots ?> belegt
                 </div>
             </div>
