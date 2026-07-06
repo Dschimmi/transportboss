@@ -361,6 +361,10 @@ for ($step = 0; $step < $maxTotalSteps; $step++) {
         $orderToLoad = &$virtualOrderPool[$poolIndex];
 
         // Teillieferungs-Splitting berechnen
+        // Verfügbares Gewicht vor dem Abzug für diesen Schritt sichern
+        $availableWeight = (int)$orderToLoad['weight_remaining'];
+
+        // Teillieferungs-Splitting berechnen
         $loadedWeight = min($orderToLoad['weight_remaining'], (int)$t['capacity_t']);
         $isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
 
@@ -370,6 +374,7 @@ for ($step = 0; $step < $maxTotalSteps; $step++) {
         $suggestedChains[$truckId][] = [
             'order' => $orderToLoad,
             'loaded_weight' => $loadedWeight,
+            'available_weight' => $availableWeight, // Sichert die Restmenge dieses Planungsschritts
             'is_split' => $isSplit,
             'empty_run_dist' => $bestCandidate['empty_run_dist'],
             'status' => $orderToLoad['is_accepted'] ? 'warehouse' : 'market'
@@ -749,7 +754,7 @@ if ($focusTruckId) {
                                         <td><?= htmlspecialchars($order['freight_type']) ?></td>
                                         <td>
                                             <?= $suggestion['loaded_weight'] ?> t 
-                                            <?= $suggestion['is_split'] ? ' <small style="color:#f39c12;">(Teilladung)</small>' : '' ?>
+                                            <?= $suggestion['is_split'] ? ' / ' . $suggestion['available_weight'] . ' t' : '' ?>
                                         </td>
                                         <td><?= number_format((float)$order['revenue'], 2, ',', '.') ?> €</td>
                                         <td>
