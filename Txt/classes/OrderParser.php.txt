@@ -1,137 +1,197 @@
 <?php
 declare(strict_types=1);
 
-require_once 'FinanceMapper.php';
-require_once 'CityService.php';
+namespace classes;
+
+use Exception;
 
 /**
- * OrderParser: Extrahiert Aufträge aus dem HTML-Text des Auftragspools und des Lagers (PH 3.2.1).
+ * OrderParser
+ *
+ * Analysiert den mehrzeiligen, tabellarisch einkopierten Text aus der Ingame-Frachtbörse (Pool)
+ * und extrahiert strukturierte Auftrags-Datenobjekte.
+ *
+ * @author TransportBoss Development
+ * @version 1.1.1
  */
 class OrderParser
 {
-    private CityService $cityService;
+    /**
+     * @var \CityService Lokaler Dienst zur Auflösung von Stadtnamen in IDs (Korrektur: globaler Namespace-Indikator)
+     */
+    private \CityService $cityService;
 
-    public function __construct(CityService $cityService)
+    /**
+     * @param \CityService $cityService Der Service zur Stadt-ID-Auflösung (Korrektur: globaler Namespace-Indikator)
+     */
+    public function __construct(\CityService $cityService)
     {
         $this->cityService = $cityService;
     }
 
     /**
-     * @param string $html Der rohe Text aus dem Spiel (aus der Textarea kopiert)
-     * @param bool $isAccepted True, wenn es aus dem Lager kommt. False, wenn es vom Markt kommt.
-     * @return array Array mit initialisierten Order-Objekten
+     * Parst den rohen Textblock der Frachtbörse.
+     *
+     * @param string $rawText Der einkopierte Text aus der Frachtbörse
+     * @param bool $isAccepted Standardmäßig false für Börsenaufträge
+     * @return array Liste der strukturierten Aufträge
+     * @throws Exception Bei Fehlern in der Stadt-Auflösung
      */
-    public function parse(string $html, bool $isAccepted): array
+    public function parse(string $rawText, bool $isAccepted = false): array
     {
-        $orders = [];
-        
-        // Da die Daten nicht in strukturiertem HTML (wie beim Personal) kopiert werden, 
-        // sondern oft als roher Copy-Paste-Text aus einer Tabelle, normalisieren wir die Zeilenumbrüche.
-        $text = str_replace(["\r\n", "\r"], "\n", $html);
-        
-        // Wir splitten nach dem typischen Muster "Zahlung: ... \n Vrzg.Strf. ... \n 0 / 0 / 0 / 0"
-        // was das Ende eines jeden Auftrags in der kopierten Tabelle markiert.
-        $blocks = preg_split('/Vrzg\.Strf\.\s*[\d,.]+\s*\n\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s*\/\s*\d+/i', $text);
+        $rawText = trim($rawText);
+        if ($rawText === '') {
+            return [];
+        }
 
-        foreach ($blocks as $block) {
-            $block = trim($block);
-            if (empty($block)) continue;
+        // Zeilenweise Aufteilung des Rohtextes
+        $lines = explode("\n", $rawText);
+        $cleanLines = [];
 
-            $order = $this->parseBlock($block, $isAccepted);
-            if ($order !== null) {
-                $orders[] = $order;
+        // Vorbereitung: Zeilen trimmen und Leerzeilen entfernen
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if ($trimmed !== '') {
+                $cleanLines[] = $trimmed;
             }
+        }
+
+        $orders = [];
+        $lineCount = count($cleanLines);
+        $i = 0;
+
+        /**
+         * Da jeder Auftrag im Kopier-Layout über mehrere Zeilen gestreckt ist,
+         * suchen wir nach bekannten Fracht-Indikatoren als Ankerpunkt für einen Block.
+         */
+        while ($i < $lineCount) {
+            $line = $cleanLines[$i];
+
+            // Prüfen, ob die aktuelle Zeile den Beginn eines Auftrags markiert (Fracht-Header)
+            if ($this->isOrderHeader($line)) {
+                try {
+                    // Block-Sicherheit prüfen: Ein vollständiger Block benötigt mindestens 7 Folgezeilen
+                    if ($i + 7 >= $lineCount) {
+                        break;
+                    }
+
+                    // 1. Frachttyp bestimmen (z.B. "Silotransport Silo" -> "Silo")
+                    $rawFreightType = $line;
+                    $freightType = $this->normalizeFreightType($rawFreightType);
+
+                    // 2. Ware, Gefahrgut-Status und Gewicht bestimmen (z.B. "(Baustoffe) 27 t" oder "(Benzin) [Gefahrgut] 46 t")
+                    $commodityLine = $cleanLines[$i + 1];
+                    $isAdr = str_contains(strtolower($commodityLine), '[gefahrgut]') ? 1 : 0;
+                    
+                    // Ware extrahieren (Text in runden Klammern)
+                    $commodity = 'Unbekannt';
+                    if (preg_match('/\(([^)]+)\)/', $commodityLine, $matches)) {
+                        $commodity = trim($matches[1]);
+                    }
+
+                    // Gewicht extrahieren (z.B. "27 t")
+                    $weight = 0;
+                    if (preg_match('/(\d+)\s*t/i', $commodityLine, $matches)) {
+                        $weight = (int)$matches[1];
+                    }
+
+                    // 3. Start- und Zielort extrahieren
+                    $fromCityName = $cleanLines[$i + 2];
+                    $toCityName = $cleanLines[$i + 3];
+
+                    // 4. Distanz auslesen (z.B. "292km")
+                    $distanceLine = $cleanLines[$i + 4];
+                    $distance = 0;
+                    if (preg_match('/(\d+)\s*km/i', $distanceLine, $matches)) {
+                        $distance = (int)$matches[1];
+                    }
+
+                    // 5. Erlös auslesen (z.B. "Zahlung: 2,643.22" -> 3-Stufen-Geldlogik)
+                    $revenueLine = $cleanLines[$i + 5];
+                    $revenue = 0.00;
+                    if (preg_match('/Zahlung:\s*([\d,.]+)/i', $revenueLine, $matches)) {
+                        $rawRevenue = $matches[1];
+                        $cleanedRevenue = str_replace(',', '', $rawRevenue); // Tausender-Komma entfernen
+                        $revenue = (float)$cleanedRevenue;
+                    }
+
+                    // 6. Städte in IDs auflösen (PH 3.2.1.3)
+                    $fromCityId = $this->cityService->resolveId($fromCityName, true);
+                    $toCityId = $this->cityService->resolveId($toCityName, true);
+
+                    // Fingerprint erzeugen für Dublettenschutz bei Marktdaten (PH 3.4.1.2)
+                    $fingerprintSource = $freightType . '|' . $commodity . '|' . $fromCityId . '|' . $toCityId . '|' . $weight . '|' . $revenue;
+                    $fingerprint = md5($fingerprintSource);
+
+                    // Strukturiertes Auftrags-Array hinzufügen
+                    $orders[] = [
+                        'ingame_order_id' => null, // Noch keine Ingame-ID im Marktpool
+                        'fingerprint' => $fingerprint,
+                        'freight_type' => $freightType,
+                        'commodity' => $commodity,
+                        'is_adr' => $isAdr,
+                        'weight_total' => $weight,
+                        'weight_remaining' => $weight,
+                        'revenue' => $revenue,
+                        'from_city_id' => $fromCityId,
+                        'to_city_id' => $toCityId,
+                        'from_city_name' => $fromCityName,
+                        'to_city_name' => $toCityName,
+                        'is_accepted' => $isAccepted ? 1 : 0,
+                        'distance_km' => $distance
+                    ];
+
+                    // Index um die verarbeitete Blockgröße von 8 Zeilen weiterschieben
+                    $i += 8;
+                    continue;
+
+                } catch (Exception $e) {
+                    // Fehlerhafte Blöcke überspringen zur Sicherung der Import-Stabilität
+                    $i++;
+                    continue;
+                }
+            }
+            $i++;
         }
 
         return $orders;
     }
 
     /**
-     * Parst einen einzelnen Auftrags-Block.
+     * Erkennt, ob eine Zeile den Start-Header eines Frachtblocks darstellt.
      */
-    private function parseBlock(string $block, bool $isAccepted): ?Order
+    private function isOrderHeader(string $line): bool
     {
-        $lines = explode("\n", $block);
-        // Leere Zeilen bereinigen
-        $lines = array_values(array_filter(array_map('trim', $lines), fn($line) => $line !== ''));
-
-        if (count($lines) < 5) return null;
-
-        // --- 1. Frachttyp und Gefahrgut (PH 3.3.1)[cite: 3] ---
-        // Zeile 1: z.B. "Silotransport Silo" -> Wir nehmen das letzte Wort als Typ
-        $typeParts = explode(' ', $lines[0]);
-        $freightType = end($typeParts);
-
-        // Zeile 2: z.B. "(Baustoffe) 27 t" ODER "(Getreide) [Gefahrgut] 22 t"
-        $line2 = $lines[1];
-        
-        // ADR-Markierung prüfen und entfernen (PH 3.3.1.2 & 3.3.1.3)[cite: 3]
-        $isAdr = false;
-        if (preg_match('/\[\s?Gefahrgut\s?\]/i', $line2)) {
-            $isAdr = true;
-            $line2 = preg_replace('/\[\s?Gefahrgut\s?\]/i', '', $line2);
-        }
-
-        // Warenbezeichnung (in Klammern)
-        $commodity = '';
-        if (preg_match('/\((.*?)\)/', $line2, $matches)) {
-            $commodity = $matches[1];
-        }
-
-        // Gewicht (Zahl vor dem 't')
-        $weight = 0;
-        if (preg_match('/(\d+)\s*t/i', $line2, $matches)) {
-            $weight = (int)$matches[1];
-        }
-
-        // --- 2. Städte extrahieren und in IDs auflösen (PH 3.2.2.2)[cite: 3] ---
-        // Zeile 3 und 4 sind die Städte
-        $fromCityName = $lines[2];
-        $toCityName = $lines[3];
-
-        $fromCityId = $this->cityService->resolveId($fromCityName, true);
-        $toCityId = $this->cityService->resolveId($toCityName, true);
-
-        // Wenn eine Stadt aufgrund der Sicherheitsregel (zu kurz) abgewiesen wurde, Auftrag überspringen
-        if ($fromCityId === null || $toCityId === null) {
-            return null;
-        }
-
-        // --- 3. Finanzen (PH 3.1)[cite: 3] ---
-        // Eine der unteren Zeilen beginnt mit "Zahlung:"
-        $revenue = 0.0;
-        foreach ($lines as $line) {
-            if (str_starts_with($line, 'Zahlung:')) {
-                $rawPrice = str_replace('Zahlung:', '', $line);
-                $cleanPrice = FinanceMapper::stripSeparators(trim($rawPrice));
-                $revenue = FinanceMapper::parseToNumeric($cleanPrice);
-                break;
+        $headers = [
+            'silotransport', 'silo', 'flüssigkeit', 'flüssigkeiten', 'kühlwaren', 
+            'schüttgutt', 'schüttgut', 'kurier', 'pritsche', 'iso-container', 
+            'schwertransport', 'koffer', 'kofferwagen', 'plane', 'stückgut'
+        ];
+        $lowerLine = strtolower($line);
+        foreach ($headers as $header) {
+            if (str_contains($lowerLine, $header)) {
+                return true;
             }
         }
+        return false;
+    }
 
-        // --- 4. Ingame ID & Fingerprint (PH 3.4.1)[cite: 3] ---
-        // Ingame-ID gibt es nur im Lager, wir lassen sie bei Börsen-Aufträgen auf NULL
-        $ingameId = null; 
-        
-        // MD5 Fingerprint generieren (PH 3.4.1.2)[cite: 3]
-        $fingerprintString = sprintf("%s|%s|%s|%d|%d|%d|%f", 
-            $freightType, $commodity, $isAdr ? '1' : '0', 
-            $fromCityId, $toCityId, $weight, $revenue
-        );
-        $fingerprint = md5($fingerprintString);
-
-        return new Order(
-            $ingameId, 
-            $fingerprint,
-            $freightType, 
-            $commodity, 
-            $isAdr, 
-            $weight, // Total
-            $weight, // Remaining (bei neuem Import identisch)
-            $revenue, 
-            $fromCityId, 
-            $toCityId, 
-            $isAccepted
-        );
+    /**
+     * Normalisiert den einkopierten Frachttyp auf die standardisierte LKW-Kategorie.
+     */
+    private function normalizeFreightType(string $rawType): string
+    {
+        $lower = strtolower($rawType);
+        if (str_contains($lower, 'silo')) return 'Silo';
+        if (str_contains($lower, 'flüssig')) return 'Tankwagen';
+        if (str_contains($lower, 'kühl')) return 'Kühlwagen';
+        if (str_contains($lower, 'schütt')) return 'Schüttgut';
+        if (str_contains($lower, 'kurier')) return 'Kurier';
+        if (str_contains($lower, 'pritsche')) return 'Pritsche';
+        if (str_contains($lower, 'iso')) return 'ISO-Container';
+        if (str_contains($lower, 'schwer')) return 'Schwertransport';
+        if (str_contains($lower, 'koffer')) return 'Koffer';
+        if (str_contains($lower, 'plane')) return 'Plane';
+        return 'Stückgut';
     }
 }

@@ -1,38 +1,84 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * orders_view.php
+ *
+ * Sichtensteuerung für die Frachtbörse (unverplante Pool-Aufträge).
+ * Lädt offene Angebote, berechnet live die Rentabilität (€/km) über den DistanceService
+ * und sortiert diese absteigend nach ihrer Profitabilität.
+ *
+ * @author TransportBoss Development
+ * @version 1.1.0
+ */
+
+// Zentrale Abhängigkeiten laden
 require_once 'db_connect.php';
 require_once 'classes/DistanceService.php';
 
-// Service für die Entfernungs-Matrix initialisieren
-$distanceService = new DistanceService($pdo);
+/**
+ * OrdersViewController
+ *
+ * Kapselt alle Leseoperationen, die Rentabilitätsberechnung
+ * und die Ranking-Logik für die Frachtbörsen-Übersicht.
+ */
+class OrdersViewController
+{
+    private PDO $pdo;
+    private DistanceService $distanceService;
 
-// Lade alle aktiven Börsen-Aufträge inkl. aufgelöster Städtenamen
-$stmt = $pdo->query("
-    SELECT 
-        o.freight_type, o.commodity, o.is_adr, o.weight_total, o.revenue,
-        c1.name AS from_city, c1.id AS from_id,
-        c2.name AS to_city, c2.id AS to_id
-    FROM orders o
-    JOIN cities c1 ON o.from_city_id = c1.id
-    JOIN cities c2 ON o.to_city_id = c2.id
-    WHERE o.is_accepted = 0 AND o.is_archived = 0
-");
-$orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    /**
+     * @param PDO $pdo Die aktive Datenbankverbindung
+     * @param DistanceService $distanceService Der Dienst zur Entfernungsberechnung
+     */
+    public function __construct(PDO $pdo, DistanceService $distanceService)
+    {
+        $this->pdo = $pdo;
+        $this->distanceService = $distanceService;
+    }
 
-// Berechne die Rentabilität (€/km) für jeden Auftrag
-foreach ($orders as &$order) {
-    // Distanz aus der importierten JS-Matrix abrufen
-    $km = $distanceService->getDistance((int)$order['from_id'], (int)$order['to_id']);
-    $order['km'] = $km;
-    
-    // Schutz vor Division durch Null
-    $order['eur_per_km'] = $km > 0 ? $order['revenue'] / $km : 0;
+    /**
+     * Holt alle offenen Börsenangebote, berechnet die Marge pro Kilometer
+     * und sortiert diese nach dem lukrativsten Durchschnitt.
+     *
+     * @return array Liste der sortierten Angebote mit Marge
+     */
+    public function getProfitabilityRanking(): array
+    {
+        // 1. Offene Börsen-Aufträge (is_accepted = 0, is_archived = 0) laden
+        $stmt = $this->pdo->query("
+            SELECT 
+                o.freight_type, o.commodity, o.is_adr, o.weight_total, o.revenue,
+                c1.name AS from_city, c1.id AS from_id,
+                c2.name AS to_city, c2.id AS to_id
+            FROM orders o
+            JOIN cities c1 ON o.from_city_id = c1.id
+            JOIN cities c2 ON o.to_city_id = c2.id
+            WHERE o.is_accepted = 0 AND o.is_archived = 0
+        ");
+        $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 2. Ertrags-Kilometer-Marge live und on the fly kalkulieren
+        foreach ($orders as &$order) {
+            $km = $this->distanceService->getDistance((int)$order['from_id'], (int)$order['to_id']);
+            $order['km'] = $km;
+            
+            // Division durch Null bei identischen Städten verhindern
+            $order['eur_per_km'] = $km > 0 ? (float)$order['revenue'] / $km : 0.0;
+        }
+        unset($order); // Referenz aufheben
+
+        // 3. Absteigend sortieren (lukrativste zuerst)
+        usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
+
+        return $orders;
+    }
 }
-unset($order); // Referenz sicher aufheben
 
-// Sortiere das Array absteigend nach dem besten €/km-Schnitt
-usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
+// Controller instanziieren und verarbeiten
+$distanceService = new DistanceService($pdo);
+$controller = new OrdersViewController($pdo, $distanceService);
+$rankedOrders = $controller->getProfitabilityRanking();
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -44,11 +90,17 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
 <body>
     <?php require_once 'nav.php'; ?>
     <div class="fluid-container">
-        <h1 class="accent-text">Lukrativste Aufträge (Pool)</h1>
+        
+        <!-- Header mit dem neuen, prominenten Link zum Börsen-Import ( market_pool.php ) -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+            <h1 class="accent-text" style="margin: 0;">Lukrativste Aufträge (Pool)</h1>
+            <a href="market_pool.php" class="btn-primary" style="text-decoration: none; padding: 10px 20px; border-radius: 3px; background-color: #f39c12; color: #121212;">+ Börsen-Import (Angebote einlesen)</a>
+        </div>
         
         <!-- Filter-Eingabefeld -->
         <input type="text" id="tableFilter" class="filter-input" placeholder="Tabelle durchsuchen (z.B. Stadt, Ware, ADR)...">
         
+        <!-- Daten-Tabelle -->
         <table class="data-table" id="sortableTable">
             <thead>
                 <tr>
@@ -62,7 +114,7 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
                 </tr>
             </thead>
             <tbody>
-            <?php foreach ($orders as $o): ?>
+            <?php foreach ($rankedOrders as $o): ?>
             <tr>
                 <td><?= htmlspecialchars($o['from_city']) ?></td>
                 <td><?= htmlspecialchars($o['to_city']) ?></td>
@@ -88,21 +140,19 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
             let rows = document.querySelectorAll('#sortableTable tbody tr');
             
             rows.forEach(row => {
-                // Prüft den gesamten Text der Zeile (Städte, ADR, Waren, etc.)
                 let text = row.textContent.toLowerCase();
                 row.style.display = text.includes(filter) ? '' : 'none';
             });
         });
 
         // --- Sortier-Logik ---
-        let sortDirections = [false, false, false, false, false, false, true]; // Speichert die Sortier-Richtung pro Spalte
+        let sortDirections = [false, false, false, false, false, false, true]; 
 
         function sortTable(columnIndex, type) {
             let table = document.getElementById("sortableTable");
             let tbody = table.querySelector("tbody");
             let rows = Array.from(tbody.querySelectorAll("tr"));
             
-            // Richtung umschalten
             let dir = !sortDirections[columnIndex];
             sortDirections[columnIndex] = dir;
 
@@ -111,7 +161,7 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
                 let valB = b.children[columnIndex].innerText.trim();
 
                 if (type === 'number') {
-                    // Bereinigt die Strings von Einheiten (t, km, €) und Tausender-Trennern für sauberen Float-Vergleich
+                    // Bereinigt die Strings von Einheiten (t, km, €) für korrekten Vergleich
                     valA = parseFloat(valA.replace(/[^0-9,-]+/g, '').replace(',', '.'));
                     valB = parseFloat(valB.replace(/[^0-9,-]+/g, '').replace(',', '.'));
                 } else {
@@ -124,7 +174,6 @@ usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
                 return 0;
             });
 
-            // Die DOM-Elemente in neuer Reihenfolge einhängen
             rows.forEach(row => tbody.appendChild(row));
         }
     </script>

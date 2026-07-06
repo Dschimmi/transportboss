@@ -36,4 +36,21 @@ class Truck
     public function isActivePlanning(): bool { return $this->isActivePlanning; }
     public function isFocussed(): bool { return $this->isFocussed; }
     public function getUserLabel(): ?string { return $this->userLabel; }
+
+    /**
+     * Gibt die Ingame-Fahrer-ID des zugewiesenen Fahrers zurück (PH 2.4).
+     * Unterstützt sowohl CamelCase- als auch snake_case-Eigenschaften.
+     *
+     * @return string|null Die Ingame-ID des Fahrers oder null
+     */
+    public function getAssignedDriverId(): ?string
+    {
+        if (isset($this->assigned_driver_id)) {
+            return (string)$this->assigned_driver_id;
+        }
+        if (isset($this->assignedDriverId)) {
+            return (string)$this->assignedDriverId;
+        }
+        return null;
+    }
 }

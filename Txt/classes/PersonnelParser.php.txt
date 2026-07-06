@@ -1,182 +1,155 @@
 <?php
-declare(strict_types=1); // Typsicherheit (PH 1.1.3.1)
+declare(strict_types=1);
+
+namespace classes;
+
+use DOMDocument;
+use DOMXPath;
+use Exception;
 
 /**
- * PersonnelParser: Extrahiert sämtliche Personaldaten (Fahrer, Disponenten, etc.) 
- * aus dem HTML-Quelltext des Stellenmarktes (PH 5.3)[cite: 5].
+ * PersonnelParser: Extrahiert strukturierte Personaldaten (Fahrer & Disponenten) 
+ * aus dem HTML-Quelltext des Stellenmarkts.
  */
 class PersonnelParser
 {
     /**
-     * @param string $html Der rohe HTML-Quelltext
-     * @return array Ein Array mit assoziativen Arrays aller gefundenen Personen
-     * @throws Exception Bei Fehlern im Parsing-Prozess (PH 1.3.5.1)
+     * Parst den übergebenen HTML-Quelltext des Stellenmarkts.
+     *
+     * @param string $html Der kopierte HTML-Quellcode
+     * @return array Liste der extrahierten Personen mit allen relevanten Attributen
+     * @throws Exception Falls Probleme bei der XML/DOM-Initialisierung auftreten
      */
     public function parse(string $html): array
     {
-        $personnel = [];
+        $html = trim($html);
+        if ($html === '') {
+            return [];
+        }
 
-        // DOMDocument initialisieren (PH 2.3.4.1)[cite: 5]
-        $dom = new DOMDocument();
-        // HTML-Errors unterdrücken, da wir rohen Quellcode importieren
+        // Interne LibXML-Fehler unterdrücken, um fehlerhaftes HTML zu tolerieren
         libxml_use_internal_errors(true);
-        // HTML laden (mb_convert_encoding sichert UTF-8 Integrität)
-        $dom->loadHTML(mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
+        $dom = new DOMDocument();
+        
+        // UTF-8 Erzwingung für Sonderzeichen beim Laden
+        $dom->loadHTML('<?xml encoding="UTF-8">' . $html);
         libxml_clear_errors();
 
-        // XPath für gezielte Knoten-Selektion (PH 2.3.4.2)[cite: 5]
         $xpath = new DOMXPath($dom);
-
-        // Alle DIVs mit der Klasse 'humanresources' suchen[cite: 5]
+        
+        // Finde alle Bewerbungskarten (Knoten mit der CSS-Klasse "humanresources")
         $nodes = $xpath->query("//div[contains(@class, 'humanresources')]");
 
         if ($nodes === false || $nodes->length === 0) {
-            return []; // Nichts gefunden
+            return [];
         }
+
+        $personnelList = [];
 
         foreach ($nodes as $node) {
-            $personData = [];
-
-            // --- 1. Berufsgruppe ermitteln ---
-            $jobTitleNode = $xpath->query(".//span[@class='header']", $node);
-            if ($jobTitleNode->length > 0) {
-                $personData['job_title'] = trim($jobTitleNode->item(0)->nodeValue);
+            // 1. Berufsbezeichnung extrahieren
+            $jobTitle = '';
+            $titleNode = $xpath->query(".//div[contains(@class, 'title')]/span[contains(@class, 'header')]", $node);
+            if ($titleNode && $titleNode->length > 0) {
+                $jobTitle = trim($titleNode->item(0)->textContent);
             }
 
-            // --- 2. Ingame ID ermitteln (aus dem selectemp()-Aufruf) ---
-            $buttonNode = $xpath->query(".//input[@type='submit' and @name='baction']", $node);
-            if ($buttonNode->length > 0) {
+            // 2. Ingame-ID aus dem Submit-Button (selectemp-Parameter) gewinnen
+            $ingameId = '';
+            $buttonNode = $xpath->query(".//input[@type='submit' or @type='button']", $node);
+            if ($buttonNode && $buttonNode->length > 0) {
                 $onclick = $buttonNode->item(0)->getAttribute('onclick');
-                // Regex um die Zahl aus 'selectemp(10658917)' zu holen
                 if (preg_match('/selectemp\((\d+)\)/', $onclick, $matches)) {
-                    $personData['ingame_id'] = $matches[1];
+                    $ingameId = $matches[1];
                 }
             }
 
-            // --- 3. Name und Alter (Linke Spalte) ---
-            // Wir suchen alle DIVs in der ersten Spalte (td) der Tabelle
-            $leftColDivs = $xpath->query(".//td[1]/div/div", $node);
-            foreach ($leftColDivs as $div) {
-                $text = trim($div->nodeValue);
-                if (str_starts_with($text, 'Vorname')) {
-                    $personData['first_name'] = $this->extractBoldValue($xpath, $div);
-                } elseif (str_starts_with($text, 'Nachname')) {
-                    $personData['last_name'] = $this->extractBoldValue($xpath, $div);
-                } elseif (str_starts_with($text, 'Alter')) {
-                    $personData['age'] = (int)$this->extractValueAfterColon($text);
+            // Hole den reinen Textinhalt des Containers für feinkörnige Regex-Suchen
+            $fullText = $node->textContent;
+
+            // 3. Vorname und Nachname isolieren
+            $firstName = '';
+            $lastName = '';
+            
+            $firstNameNode = $xpath->query(".//div[contains(text(), 'Vorname') or contains(text(), 'Vorname :')]/span", $node);
+            if ($firstNameNode && $firstNameNode->length > 0) {
+                $firstName = trim($firstNameNode->item(0)->textContent);
+            }
+            
+            $lastNameNode = $xpath->query(".//div[contains(text(), 'Nachname') or contains(text(), 'Nachname :')]/span", $node);
+            if ($lastNameNode && $lastNameNode->length > 0) {
+                $lastName = trim($lastNameNode->item(0)->textContent);
+            }
+
+            // 4. Alter auslesen
+            $age = 0;
+            if (preg_match('/Alter\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                $age = (int)$matches[1];
+            }
+
+            // 5. Zuverlässigkeit extrahieren
+            $reliabilityVal = 0;
+            if (preg_match('/Zuverlässigkeit\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                $reliabilityVal = (int)$matches[1];
+            }
+
+            // 6. Gehaltswunsch auslesen und bereinigen (Stufe 1 & 2 der Geldlogik)
+            $salary = 0.00;
+            $salaryNode = $xpath->query(".//div[contains(text(), 'Gehaltswunsch') or contains(text(), 'Gehaltswunsch :')]/span", $node);
+            if ($salaryNode && $salaryNode->length > 0) {
+                $rawSalary = trim($salaryNode->item(0)->textContent);
+                $cleanedSalary = str_replace(',', '', $rawSalary); // Tausender-Kommas entfernen (Stufe 1)
+                $cleanedSalary = preg_replace('/[^\d.]/', '', $cleanedSalary); // Nur Ziffern und Dezimalpunkt behalten
+                $salary = (float)$cleanedSalary; // Konvertierung in Float (Stufe 2)
+            }
+
+            // 7. Rollenspezifischen Skill ermitteln
+            $skillVal = 0;
+            $normalizedJob = strtolower($jobTitle);
+
+            if ($normalizedJob === 'disponent') {
+                if (preg_match('/Verwaltung\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                    $skillVal = (int)$matches[1];
+                }
+            } elseif ($normalizedJob === 'fahrer') {
+                if (preg_match('/Fahrkönnen\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                    $skillVal = (int)$matches[1];
+                }
+            } elseif ($normalizedJob === 'kfz-techniker') {
+                if (preg_match('/Kfz\.Mech\.\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                    $skillVal = (int)$matches[1];
                 }
             }
 
-            // --- 4. Qualifikationen und Gehalt (Rechte Spalte) ---
-            $rightColDivs = $xpath->query(".//td[2]/div/div", $node);
-            foreach ($rightColDivs as $div) {
-                $text = trim($div->nodeValue);
-                
-                // Generischer Skill-Wert (Fahrkönnen, Verwaltung, Kfz.Mech.)
-                if (str_contains($text, ':') && !str_starts_with($text, 'Zuverlässigkeit') && !str_starts_with($text, 'Gehaltswunsch')) {
-                     // Nur setzen wenn nicht schon belegt durch z.B. Gefahrguterlaubnis
-                     if(!isset($personData['skill_val'])){
-                         // Bei Bürokräften ist der Skill leer (<span></span>)
-                         $skillVal = $this->extractBoldValue($xpath, $div);
-                         $personData['skill_val'] = $skillVal ? (int)$skillVal : 0;
-                     }
-                }
-                
-                if (str_starts_with($text, 'Zuverlässigkeit')) {
-                    $personData['reliability_val'] = (int)$this->extractBoldValue($xpath, $div);
-                } elseif (str_starts_with($text, 'Gehaltswunsch')) {
-                    $personData['salary'] = (float)$this->extractBoldValue($xpath, $div);
-                } elseif (str_starts_with($text, 'Gefahrguterlaubnis')) {
-                    $val = $this->extractValueAfterColon($text);
-                    $personData['adr_permit'] = ((int)$val > 0);
-                } elseif (str_starts_with($text, 'Punkte in der Kartei')) {
-                    $personData['penalty_points'] = (int)$this->extractValueAfterColon($text);
-                }
+            // 8. Gefahrguterlaubnis (ADR) extrahieren
+            $adrPermit = 0;
+            if (preg_match('/Gefahrguterlaubnis\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                $adrPermit = (int)$matches[1];
             }
 
-            // Sicherstellen, dass optionale Werte für Nicht-Fahrer (z.B. ADR) existieren
-            $personData['adr_permit'] = $personData['adr_permit'] ?? false;
-            $personData['penalty_points'] = $personData['penalty_points'] ?? 0;
-
-            // Nur hinzufügen, wenn die Pflicht-ID gefunden wurde
-            if (isset($personData['ingame_id'])) {
-                // Prüfen, ob es sich um einen Disponenten handelt (PH 5.3.1.1)
-                if (isset($personData['job_title']) && str_contains(strtolower($personData['job_title']), 'disponent')) {
-                    $personData['type'] = 'dispatcher'; // Markierung für Disponenten
-                } else {
-                    $personData['type'] = 'driver'; // Standardmäßig Fahrer
-                }
-                $personnel[] = $personData;
+            // 9. Punkte in der Kartei extrahieren
+            $penaltyPoints = 0;
+            if (preg_match('/Punkte\s+in\s+der\s+Kartei\s*:\s*(\d+)/ui', $fullText, $matches)) {
+                $penaltyPoints = (int)$matches[1];
             }
-        }
 
-        return $personnel;
-    }
-
-    /**
-     * Hilfsmethode: Extrahiert den Text aus einem <span class="bold"> innerhalb eines Knotens.
-     */
-    private function extractBoldValue(DOMXPath $xpath, DOMNode $node): string
-    {
-        $boldNode = $xpath->query(".//span[@class='bold']", $node);
-        if ($boldNode->length > 0) {
-            return trim($boldNode->item(0)->nodeValue);
-        }
-        return '';
-    }
-
-    /**
-     * Hilfsmethode: Extrahiert den Wert nach einem Doppelpunkt (z.B. "Alter : 50" -> "50")
-     */
-    private function extractValueAfterColon(string $text): string
-    {
-        $parts = explode(':', $text);
-        return isset($parts[1]) ? trim($parts[1]) : '';
-    }
-       /**
-     * Speichert die geparsten Personen (Fahrer oder Disponenten) in die Datenbank.
-     * Standardmäßig werden sie als NICHT eingestellt (is_employed = false) gespeichert,
-     * da es sich um Bewerbungen handelt.
-     *
-     * @param PDO $pdo Die PDO-Datenbankverbindung
-     * @return void
-     * @throws Exception Bei Fehlern beim Speichern
-     */
-    public function saveToDatabase(PDO $pdo): void
-    {
-        $driverRepo = new DriverRepository($pdo);
-        $dispatcherRepo = new DispatcherRepository($pdo);
-
-        foreach ($this->parse($this->html) as $person) {
-            if ($person['type'] === 'dispatcher') {
-                // Disponenten speichern (als Bewerbung, nicht eingestellt)
-                $dispatcher = new Dispatcher(
-                    $person['ingame_id'],
-                    $person['first_name'],
-                    $person['last_name'],
-                    $person['age'],
-                    $person['skill_val'] ?? 0,
-                    $person['reliability_val'] ?? 0,
-                    $person['salary'] ?? 0.0,
-                    false // is_employed = false (Bewerbung, nicht eingestellt)
-                );
-                $dispatcherRepo->save($dispatcher);
-            } else {
-                // Fahrer speichern (als Bewerbung, nicht eingestellt)
-                $driver = new Driver(
-                    $person['ingame_id'],
-                    $person['first_name'],
-                    $person['last_name'],
-                    $person['age'],
-                    $person['skill_val'] ?? 0,
-                    $person['reliability_val'] ?? 0,
-                    $person['adr_permit'] ?? false,
-                    $person['penalty_points'] ?? 0,
-                    $person['salary'] ?? 0.0,
-                    false // is_employed = false (Bewerbung, nicht eingestellt)
-                );
-                $driverRepo->save($driver);
+            // Personaldatensatz nur aufnehmen, wenn eine gültige Ingame-ID extrahiert werden konnte
+            if ($ingameId !== '') {
+                $personnelList[] = [
+                    'job_title' => $jobTitle,
+                    'ingame_id' => $ingameId,
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                    'age' => $age,
+                    'skill_val' => $skillVal,
+                    'reliability_val' => $reliabilityVal,
+                    'salary' => $salary,
+                    'adr_permit' => $adrPermit,
+                    'penalty_points' => $penaltyPoints
+                ];
             }
         }
+
+        return $personnelList;
     }
 }

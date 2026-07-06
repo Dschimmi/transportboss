@@ -171,4 +171,20 @@ class OrderRepository
             'last_seen_at' => date('Y-m-d H:i:s')
         ]);
     }
+    /**
+     * Überführt einen Auftrag manuell in das Archiv (PH 4.5.5)
+     * 
+     * @param int $orderId Die technische Datenbank-ID
+     * @return bool
+     */
+    public function archiveOrder(int $orderId): bool {
+        $stmt = $this->pdo->prepare("
+            UPDATE orders 
+            SET is_archived = 1, 
+                completed_at = NOW(),
+                assigned_truck_id = NULL 
+            WHERE id = ?
+        ");
+        return $stmt->execute([$orderId]);
+    }
 }
