@@ -60,11 +60,12 @@ class WarehouseSynchronizer
         $existingWarehouseId = $stmtCheckIDN->fetchColumn();
 
         if ($existingWarehouseId !== false) {
-            // Fall 1: IDN existiert bereits -> Nur das verbleibende Restgewicht & Zeitstempel aktualisieren (Keine Dublette!)
+            // Fall 1: IDN existiert bereits -> Nur das verbleibende Restgewicht, Zeitstempel und Aktiv-Status aktualisieren (heilt Altdaten!)
             $stmtUpdateWarehouse = $this->pdo->prepare("
                 UPDATE orders 
                 SET weight_remaining = ?, 
-                    last_seen_at = NOW() 
+                    last_seen_at = NOW(),
+                    is_archived = 0
                 WHERE id = ?
             ");
             $stmtUpdateWarehouse->execute([$order['weight_remaining'], (int)$existingWarehouseId]);
@@ -74,15 +75,18 @@ class WarehouseSynchronizer
         // 2. IDN existiert noch nicht. Versuche einen passenden Börsenauftrag zu heiraten.
         // KORREKTUR: Wir suchen in aktiven (is_archived = 0) UND archivierten (is_archived = 1) Aufträgen.
         // Sortiert aktive nach oben und wählt das jüngste passende Pendant aus.
+        // KORREKTUR: Wir erlauben auch den Abgleich bereits zugewiesener (geladener) Börsenaufträge,
+        // indem wir die Einschränkung 'assigned_truck_id IS NULL' aufheben.
+        // Bereits zugewiesene Aufträge werden bei der Sortierung bevorzugt, damit die LKW-Tour aktualisiert wird.
+        // Wir nutzen eine Delta-Prüfung ABS(revenue - :revenue) < 0.01, um Float-Präzisionsfehler bei DECIMAL-Spalten zu verhindern.
         $stmtSearch = $this->pdo->prepare("
             SELECT id, is_archived FROM orders 
             WHERE is_accepted = 0 
               AND from_city_id = :from_city
               AND to_city_id = :to_city
               AND weight_total = :weight_total
-              AND revenue = :revenue
-              AND assigned_truck_id IS NULL
-            ORDER BY is_archived ASC, id DESC
+              AND ABS(revenue - :revenue) < 0.01
+            ORDER BY assigned_truck_id DESC, is_archived ASC, id DESC
             LIMIT 1
         ");
 
@@ -142,6 +146,7 @@ $parsedOrders = [];
 // Formularverarbeitung
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
     $rawData = $_POST['import_data'];
+    $importStartTime = date('Y-m-d H:i:s'); // Startzeitpunkt sichern
     
     try {
         $cityService = new CityService($pdo);
@@ -170,8 +175,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
                     $newCreatedCount++;
                 }
             }
-            
-            // Präzises, dreistufiges Feedback für den Anwender aufbauen
+            // -------------------------------------------------------------
+            // AUTO-ARCHIVIERUNG & KASKADEN-STORNO FÜR ERLEDIGTE LAGERAUFTRÄGE (PH 3.4.4.2)
+            // -------------------------------------------------------------
+            $stmtDisappeared = $pdo->prepare("
+                SELECT id, ingame_order_id, assigned_truck_id, assigned_at 
+                FROM orders 
+                WHERE is_accepted = 1 
+                  AND is_archived = 0 
+                  AND (last_seen_at < :import_start OR last_seen_at IS NULL)
+            ");
+            $stmtDisappeared->execute(['import_start' => $importStartTime]);
+            $disappearedOrders = $stmtDisappeared->fetchAll(PDO::FETCH_ASSOC);
+
+            $archivedWarehouseCount = 0;
+            foreach ($disappearedOrders as $disp) {
+                // Falls dieser verschwundene Auftrag einem LKW zugewiesen war, greift die Kaskaden-Schutzlogik:
+                if ($disp['assigned_truck_id']) {
+                    // Prüfen, ob es zeitlich davor liegende, aktive Jobs auf diesem LKW gibt
+                    $stmtEarlier = $pdo->prepare("
+                        SELECT COUNT(*) 
+                        FROM orders 
+                        WHERE assigned_truck_id = :truck_id 
+                          AND is_archived = 0 
+                          AND assigned_at < :assigned_at
+                    ");
+                    $stmtEarlier->execute([
+                        'truck_id' => $disp['assigned_truck_id'],
+                        'assigned_at' => $disp['assigned_at']
+                    ]);
+                    $hasEarlier = (int)$stmtEarlier->fetchColumn() > 0;
+
+                    if (!$hasEarlier) {
+                        // SZENARIO 1: Erster Job der Kette -> LKW-Fahrplan komplett zurücksetzen
+                        $stmtCancelAll = $pdo->prepare("
+                            UPDATE orders 
+                            SET assigned_truck_id = NULL, 
+                                assigned_at = NULL 
+                            WHERE assigned_truck_id = :truck_id 
+                              AND is_archived = 0
+                        ");
+                        $stmtCancelAll->execute(['truck_id' => $disp['assigned_truck_id']]);
+                    } else {
+                        // SZENARIO 2: Anschluss-Job -> Kaskaden-Storno ab diesem Ghost-Job
+                        $stmtCancelSubsequent = $pdo->prepare("
+                            UPDATE orders 
+                            SET assigned_truck_id = NULL, 
+                                assigned_at = NULL 
+                            WHERE assigned_truck_id = :truck_id 
+                              AND is_archived = 0 
+                              AND assigned_at >= :assigned_at
+                        ");
+                        $stmtCancelSubsequent->execute([
+                            'truck_id' => $disp['assigned_truck_id'],
+                            'assigned_at' => $disp['assigned_at']
+                        ]);
+                    }
+                }
+
+                // Den verschwundenen Auftrag ins Archiv verschieben
+                $stmtArchive = $pdo->prepare("
+                    UPDATE orders 
+                    SET is_archived = 1, 
+                        completed_at = NOW(), 
+                        assigned_truck_id = NULL, 
+                        assigned_at = NULL 
+                    WHERE id = ?
+                ");
+                $stmtArchive->execute([$disp['id']]);
+                $archivedWarehouseCount++;
+            }
+
+            // Präzises, vierstufiges Feedback für den Anwender aufbauen
             $message = "Lager-Import erfolgreich abgeschlossen! ";
             $feedbackParts = [];
             if ($matchedCount > 0) {
@@ -182,6 +257,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
             }
             if ($newCreatedCount > 0) {
                 $feedbackParts[] = "{$newCreatedCount} neue, autonome Lageraufträge wurden erfasst.";
+            }
+            if ($archivedWarehouseCount > 0) {
+                $feedbackParts[] = "{$archivedWarehouseCount} Geisteraufträge wurden automatisch archiviert und LKW-Tourpläne bereinigt.";
             }
             $message .= implode(" ", $feedbackParts);
             $messageClass = "status-success";

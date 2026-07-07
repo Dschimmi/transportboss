@@ -11,7 +11,7 @@ declare(strict_types=1);
  * - Rechts: Geteilter Detail-Arbeitsbereich (Oben: Aktive Tour / unten: Vorschlagskette)
  *
  * @author TransportBoss Development
- * @version 2.0.3
+ * @version 2.1.0
  */
 
 require_once 'db_connect.php';
@@ -557,7 +557,7 @@ if ($focusTruckId) {
                         <h3 class="accent-text workspace-title">
                             Geplante Tour für LKW ID: <?= htmlspecialchars($focusTruck['ingame_vehicle_id']) ?> (<?= htmlspecialchars($focusTruck['vehicle_type']) ?>)
                         </h3>
-                        <table class="suggestion-table" style="font-size: 0.85em;">
+                        <table class="suggestion-table workspace-table">
                             <thead>
                                 <tr>
                                     <th>Erledigt?</th>
@@ -582,7 +582,7 @@ if ($focusTruckId) {
                                 ")->fetchAll(PDO::FETCH_ASSOC);
 
                                 if (empty($assignedOrders)) {
-                                    echo '<tr><td colspan="7" class="text-center text-muted-italic" style="padding: 20px;">Keine Tour geplant</td></tr>';
+                                    echo '<tr><td colspan="7" class="text-center text-muted-italic empty-tour-cell">Keine Tour geplant</td></tr>';
                                 } else {
                                     $currentCityId = (int)$focusTruck['current_city_id'];
                                     foreach ($assignedOrders as $index => $order) {
@@ -610,6 +610,54 @@ if ($focusTruckId) {
                                         $jobTypeLabel = ((int)$order['is_accepted'] === 1) ? 'LAGER' : 'BÖRSE';
                                         $jobTypeColor = ((int)$order['is_accepted'] === 1) ? 'text-lager' : 'text-market';
 
+                                        // -------------------------------------------------------------
+                                        // BERECHNUNG DER VERFÜGBAREN TONNAGE ZUM LADEZEITPUNKT (PLANNED TOUR)
+                                        // -------------------------------------------------------------
+                                        $baseIdCond = "";
+                                        $params = [];
+                                        if (!empty($order['ingame_order_id'])) {
+                                            $baseId = explode('-', $order['ingame_order_id'])[0];
+                                            $baseIdCond = "ingame_order_id LIKE :base_id";
+                                            $params['base_id'] = $baseId . '%';
+                                        } else {
+                                            $baseIdCond = "fingerprint = :fingerprint";
+                                            $params['fingerprint'] = $order['fingerprint'];
+                                        }
+
+                                        // Summe aller Segmente, die nach diesem geladen wurden (oder zeitgleich bei höherer technischer ID)
+                                        $stmtSum = $pdo->prepare("
+                                            SELECT COALESCE(SUM(weight_total), 0) 
+                                            FROM orders 
+                                            WHERE $baseIdCond 
+                                              AND is_archived = 0 
+                                              AND assigned_truck_id IS NOT NULL 
+                                              AND (assigned_at > :assigned_at OR (assigned_at = :assigned_at AND id > :current_id))
+                                        ");
+                                        $params['assigned_at'] = $order['assigned_at'];
+                                        $params['current_id'] = $order['id'];
+                                        $stmtSum->execute($params);
+                                        $futureLoadedSum = (int)$stmtSum->fetchColumn();
+
+                                        // Unverplante Restmengen im Lager ermitteln
+                                        $stmtUnassigned = $pdo->prepare("
+                                            SELECT COALESCE(SUM(weight_remaining), 0) 
+                                            FROM orders 
+                                            WHERE $baseIdCond 
+                                              AND is_archived = 0 
+                                              AND assigned_truck_id IS NULL
+                                        ");
+                                        $unassignedParams = [];
+                                        if (!empty($order['ingame_order_id'])) {
+                                            $unassignedParams['base_id'] = $baseId . '%';
+                                        } else {
+                                            $unassignedParams['fingerprint'] = $order['fingerprint'];
+                                        }
+                                        $stmtUnassigned->execute($unassignedParams);
+                                        $unassignedSum = (int)$stmtUnassigned->fetchColumn();
+
+                                        // Tonnage zum Ladezeitpunkt = Eigene Menge + Später geladene Mengen + Unverplante Restmengen
+                                        $availableAtLoading = (int)$order['weight_total'] + $futureLoadedSum + $unassignedSum;
+
                                         echo '<tr class="row-type-cargo">
                                             <td>
                                                 <!-- Abgearbeitet-Button ganz links zur Vermeidung von Fehlklicks -->
@@ -623,7 +671,7 @@ if ($focusTruckId) {
                                             <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
                                             <td>' . htmlspecialchars($order['from_city_name']) . ' ➔ ' . htmlspecialchars($order['to_city_name']) . '</td>
                                             <td>' . $jobDistance . ' km</td>
-                                            <td>' . $order['weight_total'] . ' t</td>
+                                            <td>' . $order['weight_total'] . ' t / ' . $availableAtLoading . ' t</td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
                                                 <!-- Entladen-Button ganz rechts -->
@@ -684,8 +732,7 @@ if ($focusTruckId) {
                                         </td>
                                         <td><?= htmlspecialchars($order['freight_type']) ?></td>
                                         <td>
-                                            <?= $suggestion['loaded_weight'] ?> t 
-                                            <?= $suggestion['is_split'] ? ' / ' . $suggestion['available_weight'] . ' t' : '' ?>
+                                            <?= $suggestion['loaded_weight'] ?> t / <?= $suggestion['available_weight'] ?> t
                                         </td>
                                         <td><?= number_format((float)$order['revenue'], 2, ',', '.') ?> €</td>
                                         <td>
