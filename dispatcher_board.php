@@ -38,6 +38,28 @@ foreach ($employedDispatchers as $disp) {
     $maxDispoSlots += (int)floor((int)$disp['skill_val'] / 10);
 }
 
+// -------------------------------------------------------------
+// DYNAMISCHE PLANUNGSMODUS-WEICHE (PH § 9)
+// -------------------------------------------------------------
+// Aktiven Modus aus der Config auslesen (Fallback auf 'autopilot')
+$planningMode = $pdo->query("SELECT cfg_value FROM config WHERE cfg_key = 'planning_mode'")->fetchColumn();
+if ($planningMode === false) {
+    $planningMode = 'autopilot';
+    $pdo->exec("INSERT INTO config (cfg_key, cfg_value) VALUES ('planning_mode', 'autopilot')");
+}
+
+// POST-Aktion zur Umschaltung verarbeiten
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'toggle_planning_mode') {
+    $newMode = $_POST['mode'] === 'radar' ? 'radar' : 'autopilot';
+    $stmtUpdateMode = $pdo->prepare("UPDATE config SET cfg_value = ? WHERE cfg_key = 'planning_mode'");
+    $stmtUpdateMode->execute([$newMode]);
+    
+    // Holt die ID des fokussierten Fahrzeugs direkt aus dem Formular-Post
+    $redirectId = isset($_POST['focus_truck_id']) ? (int)$_POST['focus_truck_id'] : 0;
+    header("Location: dispatcher_board.php?focus_truck_id=" . $redirectId);
+    exit;
+}
+
 // In der Config-Tabelle persistent aktualisieren, damit alle Module das gleiche Limit nutzen
 $stmtUpdateCfg = $pdo->prepare("INSERT INTO config (cfg_key, cfg_value) VALUES ('max_dispo_slots', :val) ON DUPLICATE KEY UPDATE cfg_value = :val");
 $stmtUpdateCfg->execute(['val' => (string)$maxDispoSlots]);
@@ -49,8 +71,18 @@ if (isset($_GET['focus_truck_id'])) {
     $pdo->exec("UPDATE trucks SET is_focussed = 0");
     $pdo->exec("UPDATE trucks SET is_focussed = 1 WHERE id = $focusTruckId");
 } else {
-    $firstTruck = $pdo->query("SELECT id FROM trucks WHERE assigned_driver_id IS NOT NULL LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-    $focusTruckId = $firstTruck ? (int)$firstTruck['id'] : null;
+    // KORREKTUR: Wir lesen zuerst den in der DB gespeicherten, letzten Fokus aus!
+    $focussedTruck = $pdo->query("SELECT id FROM trucks WHERE is_focussed = 1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if ($focussedTruck) {
+        $focusTruckId = (int)$focussedTruck['id'];
+    } else {
+        // Fallback falls gar kein Fokus existiert (z. B. beim ersten Systemstart)
+        $firstTruck = $pdo->query("SELECT id FROM trucks WHERE assigned_driver_id IS NOT NULL LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        $focusTruckId = $firstTruck ? (int)$firstTruck['id'] : null;
+        if ($focusTruckId) {
+            $pdo->exec("UPDATE trucks SET is_focussed = 1 WHERE id = $focusTruckId");
+        }
+    }
 }
 
 // Entladen-Aktion (Kaskaden-Storno eines Tour-Auftrags)
@@ -78,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         ]);
     }
     
-    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId#truck-$focusTruckId");
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
     exit;
 }
 
@@ -88,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $newState = (int)$_POST['state'];
     $stmtToggle = $pdo->prepare("UPDATE trucks SET is_active_planning = ? WHERE id = ?");
     $stmtToggle->execute([$newState, $truckId]);
-    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId#truck-$focusTruckId");
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
     exit;
 }
 
@@ -118,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $pdo->rollBack();
         }
     }
-    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId#truck-$focusTruckId");
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
     exit;
 }
 
@@ -441,7 +473,29 @@ if ($focusTruckId) {
     $stmtF->execute([$focusTruckId]);
     $focusTruck = $stmtF->fetch(PDO::FETCH_ASSOC);
 }
+
+// Vorschläge basierend auf dem aktiven Planungsmodus deklarieren
+$focusSuggestions = [];
+if ($focusTruck) {
+    if ($planningMode === 'radar') {
+        // Taktisches Radar: Wir ermitteln den virtuellen Startpunkt und rufen getRadarScanForTruck auf
+        $lastOrderCity = $pdo->query("
+            SELECT to_city_id 
+            FROM orders 
+            WHERE assigned_truck_id = " . (int)$focusTruck['id'] . " AND is_archived = 0 
+            ORDER BY assigned_at DESC LIMIT 1
+        ")->fetchColumn();
+        
+        $virtualStartCityId = $lastOrderCity ? (int)$lastOrderCity : (int)$focusTruck['current_city_id'];
+        $focusSuggestions = $topologyEngine->getRadarScanForTruck((int)$focusTruck['id'], $virtualStartCityId);
+    } else {
+        // Autopilot: Wir greifen auf die im Speicher berechnete globale Kette zurück
+        $focusSuggestions = $suggestedChains[$focusTruck['id']] ?? [];
+    }
+}
 ?>
+
+
 
 <!DOCTYPE html>
 <html lang="de">
@@ -450,7 +504,7 @@ if ($focusTruckId) {
     <title>Dispatcher Board - TransportBoss</title>
     <link rel="stylesheet" href="main.css">
 </head>
-<body>
+<body class="board-body">
     <?php require_once 'nav.php'; ?>
     <div class="fluid-container">
         <h1 class="accent-text">Dispatcher Board</h1>
@@ -503,9 +557,9 @@ if ($focusTruckId) {
                 $driver = $driverMap[$truck['assigned_driver_id']] ?? null;
                 ?>
                 <!-- Zweizeiliger kompakter LKW-Button (Dynamische Zustände via Klassen abgebildet) -->
-                <div id="truck-<?= $truck['id'] ?>"
-                     class="truck-btn <?= $truck['is_active_planning'] ? 'truck-btn-active' : 'truck-btn-inactive' ?> <?= $isFocussed ? 'truck-btn-focussed' : '' ?> <?= $isAlert ? 'truck-btn-alert' : '' ?>" 
-                     onclick="selectTruck(<?= $truck['id'] ?>)">
+                <div id="truck-<?php echo $truck['id']; ?>"
+                     class="truck-btn <?php echo $truck['is_active_planning'] ? 'truck-btn-active' : 'truck-btn-inactive'; ?> <?php echo $isFocussed ? 'truck-btn-focussed' : ''; ?>" 
+                     onclick="selectTruck(<?php echo $truck['id']; ?>)">
                     
                     <!-- Reihe 1: Aktiv-Checkbox, Typ & Kapazität, geplante Jobs -->
                     <div class="btn-row-1">
@@ -536,10 +590,14 @@ if ($focusTruckId) {
                             $lastOrder = $orderRepo->getLastOrderForTruck((int)$truck['id']);
                             if ($lastOrder) {
                                 $tourEndCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$lastOrder['to_city_id'])->fetchColumn();
-                                echo '<span class="text-tour-end">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
+                                // Wenn isAlert wahr ist, färben wir den Zielort in Warnrot
+                                $cityClass = $isAlert ? 'text-tour-end-alert' : 'text-tour-end';
+                                echo '<span class="' . $cityClass . '">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
                             } else {
                                 $currentCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$truck['current_city_id'])->fetchColumn();
-                                echo '<span class="text-pos">➔ POS: ' . htmlspecialchars($currentCity) . '</span>';
+                                // Wenn isAlert wahr ist, färben wir den POS-Ort in Warnrot
+                                $cityClass = $isAlert ? 'text-pos-alert' : 'text-pos';
+                                echo '<span class="' . $cityClass . '">➔ POS: ' . htmlspecialchars($currentCity) . '</span>';
                             }
                             ?>
                         </div>
@@ -692,11 +750,17 @@ if ($focusTruckId) {
 
                     <!-- UNTERE HÄLFTE: Vorschlagskette (Tagesplanung) -->
                     <div class="detail-bottom-half" onclick="event.stopPropagation();">
-                        <h3 class="accent-text workspace-title">
-                            Vorschlagskette für dieses Fahrzeug (Tagesplanung)
-                        </h3>
+                        <div class="workspace-header-row">
+                            <h3 class="accent-text workspace-title">Vorschlagskette für dieses Fahrzeug (Tagesplanung)</h3>
+                            <form method="post" class="planning-mode-toggle-form">
+                                <input type="hidden" name="action" value="toggle_planning_mode">
+                                <input type="hidden" name="focus_truck_id" value="<?php echo $focusTruck['id']; ?>">
+                                <span class="toggle-label">Modus:</span>
+                                <button type="submit" name="mode" value="autopilot" class="btn-toggle <?php echo $planningMode === 'autopilot' ? 'active' : ''; ?>">🤖 Autopilot</button>
+                                <button type="submit" name="mode" value="radar" class="btn-toggle <?php echo $planningMode === 'radar' ? 'active' : ''; ?>">📡 Taktisches Radar</button>
+                            </form>
+                        </div>
                         <?php 
-                        $focusSuggestions = $suggestedChains[$focusTruck['id']] ?? [];
                         if (!empty($focusSuggestions)): 
                         ?>
                             <table class="suggestion-table workspace-table">
@@ -709,6 +773,9 @@ if ($focusTruckId) {
                                         <th>Gewicht (Ladung)</th>
                                         <th>Erlös</th>
                                         <th>Leerfahrt</th>
+                                        <?php if ($planningMode === 'radar'): ?>
+                                            <th>Ketten-Radar</th>
+                                        <?php endif; ?>
                                         <th>Status</th>
                                         <th>Aktion</th> <!-- ARCHIVIEREN GANZ RECHTS -->
                                     </tr>
@@ -716,37 +783,46 @@ if ($focusTruckId) {
                                 <tbody>
                                     <?php foreach ($focusSuggestions as $suggestion): ?>
                                     <?php $order = $suggestion['order']; ?>
-                                    <tr class="<?= $suggestion['is_split'] ? 'row-split-load' : '' ?>">
+                                    <tr class="<?php echo $suggestion['is_split'] ? 'row-split-load' : ''; ?>">
                                         <td>
                                             <!-- Laden-Button ganz links -->
                                             <form method="post" action="load_job.php">
-                                                <input type="hidden" name="truck_id" value="<?= $focusTruck['id'] ?>">
-                                                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                                                <input type="hidden" name="truck_id" value="<?php echo $focusTruck['id']; ?>">
+                                                <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
                                                 <button type="submit" class="btn-primary btn-load">Laden</button>
                                             </form>
                                         </td>
-                                        <td><?= htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool') ?></td>
+                                        <td><?php echo htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool'); ?></td>
                                         <td>
-                                            <?= htmlspecialchars($order['from_city_name']) ?>
-                                            ➔ <?= htmlspecialchars($order['to_city_name']) ?>
+                                            <?php echo htmlspecialchars($order['from_city_name']); ?>
+                                            ➔ <?php echo htmlspecialchars($order['to_city_name']); ?>
                                         </td>
-                                        <td><?= htmlspecialchars($order['freight_type']) ?></td>
+                                        <td><?php echo htmlspecialchars($order['freight_type']); ?></td>
                                         <td>
-                                            <?= $suggestion['loaded_weight'] ?> t / <?= $suggestion['available_weight'] ?> t
+                                            <?php echo $suggestion['loaded_weight']; ?> t / <?php echo $suggestion['available_weight']; ?> t
                                         </td>
-                                        <td><?= number_format((float)$order['revenue'], 2, ',', '.') ?> €</td>
+                                        <td><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</td>
                                         <td>
-                                            <?= $suggestion['empty_run_dist'] ?> km
-                                            <?= $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>' ?>
+                                            <?php echo $suggestion['empty_run_dist']; ?> km
+                                            <?php echo $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>'; ?>
                                         </td>
-                                        <td class="status-<?= $suggestion['status'] ?>">
-                                            <?= $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE' ?>
+                                        <?php if ($planningMode === 'radar'): ?>
+                                            <td>
+                                                <?php 
+                                                $radar = $suggestion['radar_indicator'];
+                                                $radarClass = 'radar-type-' . $radar['type'];
+                                                echo '<span class="' . $radarClass . '">' . htmlspecialchars($radar['label']) . '</span>';
+                                                ?>
+                                            </td>
+                                        <?php endif; ?>
+                                        <td class="status-<?php echo $suggestion['status']; ?>">
+                                            <?php echo $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE'; ?>
                                         </td>
                                         <td>
                                             <!-- Archivieren-Button ganz rechts -->
                                             <form method="post" onsubmit="return confirm('Möchten Sie diesen Vorschlag dauerhaft ausblenden/archivieren? Nachfolgende Glieder passen dann nicht mehr.');">
                                                 <input type="hidden" name="action" value="archive_pool_order">
-                                                <input type="hidden" name="order_id" value="<?= $order['id'] ?>">
+                                                <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
                                                 <button type="submit" class="btn-primary btn-archive-action">Archivieren</button>
                                             </form>
                                         </td>

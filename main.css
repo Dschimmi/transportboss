@@ -647,3 +647,189 @@ body {
     color: #2ecc71 !important;
     font-weight: bold !important;
 }
+
+/* ==========================================================================
+   HYBRIDER PLANUNGS-TOGGLE & KETTEN-RADAR INDIKATOREN (PH § 9)
+   ========================================================================== */
+
+/* Flex-Ausrichtung für die Header-Zeile des Detail-Arbeitsbereichs */
+.workspace-header-row {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-bottom: 12px !important;
+    border-bottom: 1px solid #444 !important;
+    padding-bottom: 8px !important;
+}
+
+/* Verhindert, dass die Standard-Überschrift einen eigenen unteren Rand hat */
+.workspace-header-row .workspace-title {
+    margin: 0 !important;
+    font-size: 1.1em !important;
+}
+
+/* Das Toggle-Formular */
+.planning-mode-toggle-form {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+.toggle-label {
+    font-size: 0.85em !important;
+    color: #aaaaaa !important;
+    font-weight: 600 !important;
+}
+
+/* Styling der Toggle-Buttons */
+.btn-toggle {
+    background-color: #1e1e1e !important;
+    color: #aaaaaa !important;
+    border: 1px solid #444 !important;
+    padding: 5px 10px !important;
+    font-size: 0.85em !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    border-radius: 3px !important;
+    transition: all 0.15s ease-in-out !important;
+}
+
+.btn-toggle:hover {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border-color: #555 !important;
+}
+
+/* Aktiver Zustand des Toggle-Buttons (Aktiviertes Orange) */
+.btn-toggle.active {
+    background-color: #f39c12 !important;
+    color: #121212 !important;
+    border-color: #f39c12 !important;
+}
+
+/* Ampelfarben des Ketten-Radars nach PH § 7.3 */
+.radar-type-1 {
+    color: #2ecc71 !important; /* Erfolgsgrün für direkte Stufe-1-Ketten */
+    font-weight: bold !important;
+}
+
+.radar-type-2 {
+    color: #f39c12 !important; /* Orange für überbrückte Stufe-2-Ketten (3SR) */
+    font-weight: bold !important;
+}
+
+.radar-type-3 {
+    color: #e74c3c !important; /* Warnrot für sackgassen-bedinge Transferfahrten (Stufe 3) */
+    font-weight: bold !important;
+}
+/* ==========================================================================
+   PERSISTENTES WINDOW-SCROLLING-SPERRE & DEZENTE ALARME (PH § 1.4)
+   ========================================================================== */
+
+/* Verhindert das globale Scrollen des gesamten Fensters exklusiv auf dem Board */
+.board-body {
+    height: 100vh !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+/* Passt das Layout exakt an die Bildschirmhöhe an, um Scrollbauten zu eliminieren */
+.board-layout {
+    display: flex !important;
+    gap: 15px !important;
+    height: calc(100vh - 165px) !important; /* Exakter Abzug für Body-Padding, Nav und Header */
+    overflow: hidden !important;
+}
+
+/* Dezente warnrote Einfärbung des Zielorts bei Sackgassen anstelle des LKW-Ränder-Alarms */
+.text-tour-end-alert,
+.text-pos-alert {
+    color: #e74c3c !important; /* Signalrot für Sackgassen */
+    font-weight: bold !important;
+}
+```
+
+**Ersetzen Sie diesen durch (Flexbox-Viewport-Layout):**
+
+/* ==========================================================================
+   VIEWPORT-FLEXBOX-SYSTEM MIT AKTIVEN SPALTEN-SCROLLBARS (PH § 1.4)
+   Eliminiert das globale Scrollen und hält die Spalten perfekt scrollbar.
+   ========================================================================== */
+
+/* Macht den Body zu einem starren Viewport-Container exklusiv auf dem Board */
+.board-body {
+    height: 100vh !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* Begrenzt den Haupt-Container exakt auf den verbleibenden Platz unter der nav.php (55px) */
+.board-body .fluid-container {
+    height: calc(100vh - 55px) !important; /* Zwingt den Container, absolut auf den Bildschirm zu passen */
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 15px !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+/* Eliminiert H1-Abstände nach oben, um Verschiebungen zu verhindern */
+.board-body h1.accent-text {
+    margin-top: 0 !important;
+    margin-bottom: 10px !important;
+}
+
+/* Das Layout-Grid füllt präzise den verbleibenden Platz im Container aus */
+.board-body .board-layout {
+    flex: 1 !important;
+    display: flex !important;
+    gap: 15px !important;
+    height: 100% !important; /* Erzwingt die volle Ausnutzung */
+    min-height: 0 !important; /* Löst den Browser-Scroll-Bug */
+    overflow: hidden !important;
+}
+
+//* Zwingt die Stadtliste (Links) in die exakte Spaltenhöhe, vergrößert auf 300px für optimalen Raum */
+.board-body .board-sidebar {
+    width: 300px !important; /* Von 250px auf 300px erhöht für optimale Lesbarkeit */
+    height: 100% !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+    padding-right: 15px !important; /* Komfortabler Puffer-Kanal für den Scrollbalken */
+}
+
+/* Stellt das Filter-Eingabefeld wieder auf die volle, angepasste Breite */
+.board-body .city-filter-input {
+    width: 100% !important;
+}
+
+/* Die Strategie-Tabelle nutzt die vollen, komfortablen 300px Breite */
+.board-body #sidebarTable {
+    width: 100% !important;
+}
+
+/* Zwingt den Fuhrpark (Mitte) in die exakte Spaltenhöhe mit aktiver Scrollbar und Puffer-Abstand */
+.board-body .board-middle {
+    height: 100% !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+    padding-right: 15px !important; /* Puffer-Zone verhindert die Überdeckung der Fahrzeug-Buttons */
+}
+
+/* Zwingt den Detail-Arbeitsbereich (Rechts) in die exakte Spaltenhöhe */
+.board-body .board-right-workspace {
+    height: 100% !important;
+    overflow: hidden !important; /* Verhindert das Scrollen des gesamten Spalten-Containers */
+    box-sizing: border-box !important;
+}
+
+/* Dezente warnrote Einfärbung des Zielorts bei Sackgassen */
+.text-tour-end-alert,
+.text-pos-alert {
+    color: #e74c3c !important;
+    font-weight: bold !important;
+}

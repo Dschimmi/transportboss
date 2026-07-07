@@ -341,4 +341,223 @@ class TopologyEngine
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
+    /**
+     * Taktisches Radar: Findet ALLE kompatiblen Aufträge im 3-Städte-Radius (Auswahl-Garantie, PH § 9.3.4)
+     * und bereichert sie um den vorausschauenden Ketten-Radar-Indikator.
+     *
+     * @param int $truckId Die ID des LKW
+     * @param int $currentCityId Start- oder Tourende-Stadt des LKW
+     * @return array Liste aller Optionen mit Ketten-Indikator
+     */
+    public function getRadarScanForTruck(int $truckId, int $currentCityId): array
+    {
+        // 1. Fahrzeugdaten laden
+        $truckStmt = $this->pdo->prepare("SELECT capacity_t, vehicle_type FROM trucks WHERE id = ?");
+        $truckStmt->execute([$truckId]);
+        $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$truck) {
+            return [];
+        }
+
+        $capacity = (int)$truck['capacity_t'];
+        $vehicleType = $truck['vehicle_type'];
+
+        // 2. Die 3-Städte-Nachbarschaft ermitteln
+        $neighborCities = $this->getNearestCities($currentCityId, 2);
+        $relevantCityIds = array_merge([$currentCityId], $neighborCities);
+
+        $placeholders = implode(',', array_fill(0, count($relevantCityIds), '?'));
+        
+        // 3. Auswahl-Garantie: Alle regionalen passenden Aufträge auslesen (Limit auf 15 Einträge)
+        $orderStmt = $this->pdo->prepare("
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+            FROM orders o
+            JOIN cities c1 ON o.from_city_id = c1.id
+            JOIN cities c2 ON o.to_city_id = c2.id
+            WHERE o.from_city_id IN ($placeholders)
+            AND o.is_archived = 0
+            AND o.assigned_truck_id IS NULL
+            ORDER BY o.from_city_id = ? DESC, (o.revenue / o.weight_total) DESC
+            LIMIT 15
+        ");
+
+        $params = array_merge($relevantCityIds, [$currentCityId]);
+        $orderStmt->execute($params);
+        $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $radarScan = [];
+        foreach ($orders as $order) {
+            // Kompatibilitäts-Checks (Fahrzeugtyp, ADR-Erlaubnis)
+            if (!$this->isTypeCompatible($order['freight_type'], $vehicleType)) {
+                continue;
+            }
+
+            if ($order['is_adr'] && !$this->hasAdrDriverForTruck($truckId)) {
+                continue;
+            }
+
+            // Slot-Prüfung für Marktaufträge
+            if (!$order['is_accepted'] && !$this->hasFreeSlots()) {
+                continue;
+            }
+
+            $distanceToOrder = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
+            $routeDistance = $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']);
+            
+            // Tonnagen und Split-Verhalten im Voraus ermitteln
+            $loadedWeight = min((int)$order['weight_remaining'], $capacity);
+            $isSplit = (int)$order['weight_remaining'] > $capacity;
+
+            // Simuliert vorausschauend die Ketten-Tiefe ab dem Zielort (PH § 7)
+            $radarScan[] = [
+                'order' => $order,
+                'loaded_weight' => $loadedWeight,
+                'available_weight' => (int)$order['weight_remaining'],
+                'is_split' => $isSplit,
+                'empty_run_dist' => $distanceToOrder,
+                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($routeDistance, 1)),
+                'is_fallback' => false,
+                'status' => $order['is_accepted'] ? 'warehouse' : 'market',
+                'radar_indicator' => $this->simulateRadarChain((int)$order['to_city_id'], $truckId, $vehicleType, $capacity)
+            ];
+        }
+
+        // 4. Globales Fallback: Falls im 3-Städte-Radius gar nichts existiert
+        if (empty($radarScan)) {
+            $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity);
+            foreach ($fallbackOrders as $fallbackOrder) {
+                $distanceToOrder = $this->distanceService->getDistance($currentCityId, (int)$fallbackOrder['from_city_id']);
+                $routeDistance = $this->distanceService->getDistance((int)$fallbackOrder['from_city_id'], (int)$fallbackOrder['to_city_id']);
+                
+                $loadedWeight = min((int)$fallbackOrder['weight_remaining'], $capacity);
+                $isSplit = (int)$fallbackOrder['weight_remaining'] > $capacity;
+
+                $radarScan[] = [
+                    'order' => $fallbackOrder,
+                    'loaded_weight' => $loadedWeight,
+                    'available_weight' => (int)$fallbackOrder['weight_remaining'],
+                    'is_split' => $isSplit,
+                    'empty_run_dist' => $distanceToOrder,
+                    'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
+                    'is_fallback' => true,
+                    'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market',
+                    'radar_indicator' => $this->simulateRadarChain((int)$fallbackOrder['to_city_id'], $truckId, $vehicleType, $capacity)
+                ];
+            }
+        }
+
+        // 5. Priorisierte Sortierung: 1. Leerfahrt-Entfernung (ASC), 2. Erlös pro tkm (DESC) (KORREKTUR: Nutzt harmonisierten Key)
+        usort($radarScan, function($a, $b) {
+            if ($a['empty_run_dist'] !== $b['empty_run_dist']) {
+                return $a['empty_run_dist'] <=> $b['empty_run_dist'];
+            }
+            return $b['earning_per_tkm'] <=> $a['earning_per_tkm'];
+        });
+
+        return $radarScan;
+    }
+
+    /**
+     * Simuliert vorausschauend die Ketten-Tiefe für eine Option (max 5 Schritte) nach PH § 7.3.
+     *
+     * @param int $startCityId Zielort des aktuellen Vorschlags (Startpunkt der Simulation)
+     * @param int $truckId Die Fahrzeug-ID
+     * @param string $vehicleType Der Fahrzeugtyp
+     * @param int $capacity Die Kapazität des LKW
+     * @return array Array mit 'type' (1=Grün, 2=Orange, 3=Rot) und 'label' (Anzeigetext)
+     */
+    private function simulateRadarChain(int $startCityId, int $truckId, string $vehicleType, int $capacity): array
+    {
+        $hasAdr = $this->hasAdrDriverForTruck($truckId);
+        $currentCityId = $startCityId;
+        $depth = 0;
+        $maxDepth = 5; // Begrenzung der Vorschau-Tiefe
+        $neighborUsed = false;
+        $fallbackRequired = false;
+        $usedIds = []; // Verhindert Endlosschleifen mit derselben ID in der Simulation
+
+        while ($depth < $maxDepth) {
+            // 1. STUFE 1: Suche nach Direkt-Anschlüssen (0 km Leerfahrt)
+            $stmt0 = $this->pdo->prepare("
+                SELECT id, to_city_id, freight_type 
+                FROM orders 
+                WHERE from_city_id = ? 
+                  AND is_archived = 0 
+                  AND assigned_truck_id IS NULL
+                  AND weight_total <= ?
+                  AND (is_adr = 0 OR ? = 1)
+            ");
+            $stmt0->execute([$currentCityId, $capacity, (int)$hasAdr]);
+            $directs = $stmt0->fetchAll(PDO::FETCH_ASSOC);
+
+            $foundJob = null;
+            foreach ($directs as $d) {
+                if (in_array($d['id'], $usedIds, true)) continue;
+                if ($this->isTypeCompatible($d['freight_type'], $vehicleType)) {
+                    $foundJob = $d;
+                    break;
+                }
+            }
+
+            if ($foundJob) {
+                $usedIds[] = $foundJob['id'];
+                $currentCityId = (int)$foundJob['to_city_id'];
+                $depth++;
+                continue;
+            }
+
+            // 2. STUFE 2: Keine Direktfracht -> 3-Städte-Regel (Nachbarschafts-Überbrückung)
+            $neighborCities = $this->getNearestCities($currentCityId, 2);
+            if (!empty($neighborCities)) {
+                $placeholders = implode(',', array_fill(0, count($neighborCities), '?'));
+                $stmtNear = $this->pdo->prepare("
+                    SELECT id, to_city_id, freight_type 
+                    FROM orders 
+                    WHERE from_city_id IN ($placeholders) 
+                      AND is_archived = 0 
+                      AND assigned_truck_id IS NULL
+                      AND weight_total <= ?
+                      AND (is_adr = 0 OR ? = 1)
+                ");
+                $params = array_merge($neighborCities, [$capacity, (int)$hasAdr]);
+                $stmtNear->execute($params);
+                $nears = $stmtNear->fetchAll(PDO::FETCH_ASSOC);
+
+                foreach ($nears as $n) {
+                    if (in_array($n['id'], $usedIds, true)) continue;
+                    if ($this->isTypeCompatible($n['freight_type'], $vehicleType)) {
+                        $foundJob = $n;
+                        break;
+                    }
+                }
+            }
+
+            if ($foundJob) {
+                $usedIds[] = $foundJob['id'];
+                $currentCityId = (int)$foundJob['to_city_id'];
+                $depth++;
+                $neighborUsed = true;
+                continue;
+            }
+
+            // 3. STUFE 3: Globaler Fallback-Transfer erforderlich (Sackgasse)
+            $fallbackRequired = true;
+            break;
+        }
+
+        // Rückgabe des formatierten Indikators
+        if ($fallbackRequired && $depth < 2) {
+            return [
+                'type' => 3,
+                'label' => 'Achtung: Transferfahrt nötig'
+            ];
+        }
+
+        $labelSuffix = $neighborUsed ? ' (inkl. 3SR)' : '';
+        return [
+            'type' => $neighborUsed ? 2 : 1,
+            'label' => ($depth > 0 ? ($depth . '+') : '0') . ' Aufträge' . $labelSuffix
+        ];
+    }
 }

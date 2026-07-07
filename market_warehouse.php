@@ -176,10 +176,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
                 }
             }
             // -------------------------------------------------------------
-            // AUTO-ARCHIVIERUNG & KASKADEN-STORNO FÜR ERLEDIGTE LAGERAUFTRÄGE (PH 3.4.4.2)
+            // AUTO-ARCHIVIERUNG & AUTOMATISCHE TOUREN-FORTSCHREIBUNG (PH § 8)
+            // KORREKTUR: "Wenn eingeplant, dann eingeplant!" - Keine automatischen Stornos mehr!
             // -------------------------------------------------------------
             $stmtDisappeared = $pdo->prepare("
-                SELECT id, ingame_order_id, assigned_truck_id, assigned_at 
+                SELECT id, ingame_order_id, to_city_id, assigned_truck_id 
                 FROM orders 
                 WHERE is_accepted = 1 
                   AND is_archived = 0 
@@ -190,50 +191,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
 
             $archivedWarehouseCount = 0;
             foreach ($disappearedOrders as $disp) {
-                // Falls dieser verschwundene Auftrag einem LKW zugewiesen war, greift die Kaskaden-Schutzlogik:
+                // Wenn der erledigte Auftrag einem LKW zugewiesen war, hat der LKW ihn geliefert.
+                // Wir verschieben den LKW-Standort automatisch an das Ziel dieses gelieferten Jobs.
                 if ($disp['assigned_truck_id']) {
-                    // Prüfen, ob es zeitlich davor liegende, aktive Jobs auf diesem LKW gibt
-                    $stmtEarlier = $pdo->prepare("
-                        SELECT COUNT(*) 
-                        FROM orders 
-                        WHERE assigned_truck_id = :truck_id 
-                          AND is_archived = 0 
-                          AND assigned_at < :assigned_at
+                    $stmtMoveTruck = $pdo->prepare("
+                        UPDATE trucks 
+                        SET current_city_id = ? 
+                        WHERE id = ?
                     ");
-                    $stmtEarlier->execute([
-                        'truck_id' => $disp['assigned_truck_id'],
-                        'assigned_at' => $disp['assigned_at']
+                    $stmtMoveTruck->execute([
+                        (int)$disp['to_city_id'],
+                        (int)$disp['assigned_truck_id']
                     ]);
-                    $hasEarlier = (int)$stmtEarlier->fetchColumn() > 0;
-
-                    if (!$hasEarlier) {
-                        // SZENARIO 1: Erster Job der Kette -> LKW-Fahrplan komplett zurücksetzen
-                        $stmtCancelAll = $pdo->prepare("
-                            UPDATE orders 
-                            SET assigned_truck_id = NULL, 
-                                assigned_at = NULL 
-                            WHERE assigned_truck_id = :truck_id 
-                              AND is_archived = 0
-                        ");
-                        $stmtCancelAll->execute(['truck_id' => $disp['assigned_truck_id']]);
-                    } else {
-                        // SZENARIO 2: Anschluss-Job -> Kaskaden-Storno ab diesem Ghost-Job
-                        $stmtCancelSubsequent = $pdo->prepare("
-                            UPDATE orders 
-                            SET assigned_truck_id = NULL, 
-                                assigned_at = NULL 
-                            WHERE assigned_truck_id = :truck_id 
-                              AND is_archived = 0 
-                              AND assigned_at >= :assigned_at
-                        ");
-                        $stmtCancelSubsequent->execute([
-                            'truck_id' => $disp['assigned_truck_id'],
-                            'assigned_at' => $disp['assigned_at']
-                        ]);
-                    }
                 }
 
-                // Den verschwundenen Auftrag ins Archiv verschieben
+                // Den beendeten Auftrag archivieren (und sauber entkoppeln)
                 $stmtArchive = $pdo->prepare("
                     UPDATE orders 
                     SET is_archived = 1, 
@@ -259,7 +231,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
                 $feedbackParts[] = "{$newCreatedCount} neue, autonome Lageraufträge wurden erfasst.";
             }
             if ($archivedWarehouseCount > 0) {
-                $feedbackParts[] = "{$archivedWarehouseCount} Geisteraufträge wurden automatisch archiviert und LKW-Tourpläne bereinigt.";
+                $feedbackParts[] = "{$archivedWarehouseCount} Im Spiel beendete/erledigte Lageraufträge wurden archiviert und LKW-Standorte aktualisiert.";
             }
             $message .= implode(" ", $feedbackParts);
             $messageClass = "status-success";
