@@ -747,9 +747,9 @@ body {
     color: #e74c3c !important; /* Signalrot für Sackgassen */
     font-weight: bold !important;
 }
-```
 
-**Ersetzen Sie diesen durch (Flexbox-Viewport-Layout):**
+
+/*Ersetzen Sie diesen durch (Flexbox-Viewport-Layout):*/
 
 /* ==========================================================================
    VIEWPORT-FLEXBOX-SYSTEM MIT AKTIVEN SPALTEN-SCROLLBARS (PH § 1.4)
@@ -793,7 +793,7 @@ body {
     overflow: hidden !important;
 }
 
-//* Zwingt die Stadtliste (Links) in die exakte Spaltenhöhe, vergrößert auf 300px für optimalen Raum */
+/* Zwingt die Stadtliste (Links) in die exakte Spaltenhöhe, vergrößert auf 300px für optimalen Raum */
 .board-body .board-sidebar {
     width: 300px !important; /* Von 250px auf 300px erhöht für optimale Lesbarkeit */
     height: 100% !important;
@@ -832,4 +832,189 @@ body {
 .text-pos-alert {
     color: #e74c3c !important;
     font-weight: bold !important;
+}
+/* Horizontale Ausrichtung der Filter sauber nebeneinander */
+.filter-panel {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 15px !important;
+    background-color: #252525 !important;
+    padding: 15px !important;
+    border-radius: 5px !important;
+    border: 1px solid #444 !important;
+    margin-bottom: 20px !important;
+    align-items: flex-end !important;
+}
+
+.filter-group {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 5px !important;
+}
+
+.filter-group label {
+    font-size: 0.85em !important;
+    color: #aaaaaa !important;
+    font-weight: 600 !important;
+}
+
+/* Freitextfeld-Spalte nimmt den restlichen Platz ein */
+.filter-search-group {
+    flex: 1 !important;
+    min-width: 200px !important;
+}
+
+.filter-search-group .filter-input {
+    margin-bottom: 0 !important;
+}
+
+/* Festgelegte Breite für das numerische Marge-Feld */
+.filter-min-km {
+    width: 100px !important;
+}
+
+/* Ausblenden gefilterter Zeilen (Ersatz für Inline-CSS-Display) */
+.hidden-row {
+    display: none !important;
+}
+
+/* Farbabstufungen für Kilometererlöse (Rot -> Gelb -> Grün) */
+.price-very-bad {
+    color: #e74c3c !important; /* Signalrot: Unter 75 % des historischen Warenschnitts */
+    font-weight: bold !important;
+}
+
+.price-bad {
+    color: #e67e22 !important; /* Orange: 75 % bis 95 % des Warenschnitts */
+    font-weight: bold !important;
+}
+
+.price-average {
+    color: #f1c40f !important; /* Gelb: 95 % bis 105 % des Warenschnitts */
+    font-weight: bold !important;
+}
+
+.price-good {
+    color: #2ecc71 !important; /* Helles Grün: 105 % bis 125 % des Warenschnitts */
+    font-weight: bold !important;
+}
+
+.price-excellent {
+    color: #27ae60 !important; /* Tiefes Grün: Über 125 % des Warenschnitts (Die Sahnestücke!) */
+    font-weight: bold !important;
+}
+/* ==========================================================================
+   FRACHTBÖRSE: MULTI-VEHICLE-CHECKBOX-CONTAINER & FILTERPANEL
+   ========================================================================== */
+
+/* Sauberes Flex-Layout für das obere Filterpanel */
+.filter-panel {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 15px !important;
+    background-color: #252525 !important;
+    padding: 15px !important;
+    border-radius: 5px !important;
+    border: 1px solid #444 !important;
+    margin-bottom: 20px !important;
+    align-items: flex-end !important;
+}
+
+.filter-group {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 5px !important;
+}
+
+.filter-group label {
+    font-size: 0.85em !important;
+    color: #aaaaaa !important;
+    font-weight: 600 !important;
+}
+
+.filter-search-group {
+    flex: 1 !important;
+    min-width: 200px !important;
+}
+
+.filter-search-group .filter-input {
+    margin-bottom: 0 !important;
+}
+
+.filter-min-km {
+    width: 100px !important;
+}
+
+.hidden-row {
+    display: none !important;
+}
+
+/* Dehnbare Spalte über die volle Breite für die Checkboxen */
+.filter-vehicle-group {
+    width: 100% !important;
+    margin-top: 10px !important;
+}
+
+/* Scrollbarer, flach gestalteter Container für die 12 Fahrzeug-Checkboxen */
+.checkbox-filter-container {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 12px 20px !important; /* Vertikaler und horizontaler Abstand */
+    background-color: #1e1e1e !important;
+    padding: 10px 15px !important;
+    border-radius: 3px !important;
+    border: 1px solid #444 !important;
+    max-height: 100px !important;
+    overflow-y: auto !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* Label-Kapselung für perfekte Ausrichtung von Checkbox und Text */
+.checkbox-filter-label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    font-size: 0.85em !important;
+    color: #ffffff !important;
+    cursor: pointer !important;
+    white-space: nowrap !important;
+    user-select: none !important;
+}
+
+.filter-vehicle-checkbox {
+    margin: 0 !important;
+    width: 16px !important;
+    height: 16px !important;
+    cursor: pointer !important;
+}
+
+/* Farbabstufungen für Kilometererlöse (Rot -> Gelb -> Grün) */
+.price-very-bad {
+    color: #e74c3c !important; /* Unter 75 % */
+    font-weight: bold !important;
+}
+
+.price-bad {
+    color: #e67e22 !important; /* 75 % bis 95 % */
+    font-weight: bold !important;
+}
+
+.price-average {
+    color: #f1c40f !important; /* 95 % bis 105 % */
+    font-weight: bold !important;
+}
+
+.price-good {
+    color: #2ecc71 !important; /* 105 % bis 125 % */
+    font-weight: bold !important;
+}
+
+.price-excellent {
+    color: #27ae60 !important; /* Über 125 % (Sahnestück-Umsatz) */
+    font-weight: bold !important;
+}
+/* Kompakte Breite für die beiden Gewichts-Grenzwerte in der Börse */
+.filter-weight {
+    width: 80px !important;
 }

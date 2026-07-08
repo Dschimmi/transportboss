@@ -87,3 +87,12 @@
 ### § 9.5. Strikte Namenskonvention für neuen Source-Code
 * **9.5.1.** Sämtliche neu zu erstellenden Datenbank-Abfragen, Klassen-Methoden und Variablen-Bezeichnungen, die den Modus „Taktisches Radar“ betreffen, müssen zwingend die Begriffe `radar` oder `radarScan` enthalten. 
 * **9.5.2.** Die Verwendung des Begriffs `suggestion` innerhalb von neuen Radar-Modulen ist zur Vermeidung von kognitiven Konflikten im Code-Review strikt verboten. Der bestehende, funktionierende Code des Autopilot-Moduls bleibt davon unberührt.
+
+## § 10.5. Re-Import und die automatische Subtraktions-Logik
+* **10.5.1.** Um eine Verdopplung oder künstliche Inflation der verfügbaren Markt-Tonnagen zu verhindern, wendet der Importer bei jedem Einlesen eine mathematische Abzugs-Prüfung an.
+* **10.5.2.** Findet der Importer für einen eingelesenen Markt-Auftrag bereits verplante, aktive Segmente in der Datenbank, ermittelt das System deren **kumulierte Gesamt-Lademenge** (die Summe aller bereits auf LKW verteilten Tonnen).
+* **10.5.3.** Diese ermittelte Gesamt-Lademenge wird anschließend **vom originalen Ingame-Gewicht subtrahiert (abgezogen)**, um das korrekte Restgewicht (`weight_remaining`) für den Pool-Datensatz zu berechnen. Der neu importierte, unberührte Markt-Datensatz wird daraufhin mit folgenden Werten in der Datenbank angelegt:
+  * `weight_total` = Original-Gewicht laut Ingame-Börse (z. B. **43 t**, zur einfachen Identifikation im Spiel).
+  * `weight_remaining` = `Original-Gewicht - bereits verplantes Gewicht` (z. B. **17 t**, zur korrekten Darstellung der verbliebenen Rest-Fracht).
+  * `revenue` = `Original-Erlös - bereits verplanter Erlös` (z. B. **1.673,71 €**, zur exakten Margen-Berechnung).
+* **10.5.4.** Diese Subtraktions-Garantie stellt sicher, dass das Radar für alle anderen Fahrzeuge exakt den noch offenen Rest-Anteil anzeigt, während das bereits verplante Teilstück sicher auf dem ersten LKW verbleibt.
