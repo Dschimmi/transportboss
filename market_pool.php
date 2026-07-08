@@ -75,40 +75,72 @@ class MarketPoolController
 
             $this->pdo->beginTransaction();
 
+            // 1. SCHRITT: Bereinigung aller unverplanten Börsen-Aufträge (PH § 10.3)
+            // Verhindert das Verbleiben verwaister Reste und heilt die Fragmentierung sofort.
+            $this->pdo->exec("
+                DELETE FROM orders 
+                WHERE is_accepted = 0 
+                  AND assigned_truck_id IS NULL 
+                  AND is_archived = 0
+            ");
+
             $importedCount = 0;
             foreach ($parsedOrders as $order) {
-                // 1. Dubletten-Schutz: Prüfen, ob dieser Auftrag bereits aktiv im Pool existiert (PH 3.4.2)
-                $stmtCheck = $this->pdo->prepare("
-                    SELECT id FROM orders 
-                    WHERE fingerprint = :fingerprint 
-                      AND is_accepted = 0 
-                      AND is_archived = 0 
-                    LIMIT 1
+                // 2. SCHRITT: Subtraktions-Prüfung für bereits verplante Teile (PH § 10.5)
+                // Da wir oben die unzugeordneten gelöscht haben, finden wir hier exakt die bereits verplanten Segmente!
+                $stmtSum = $this->pdo->prepare("
+                    SELECT 
+                        COALESCE(SUM(weight_total), 0) AS assigned_weight,
+                        COALESCE(SUM(revenue), 0) AS assigned_revenue
+                    FROM orders
+                    WHERE fingerprint = :fingerprint
+                      AND is_accepted = 0
+                      AND assigned_truck_id IS NOT NULL
+                      AND is_archived = 0
                 ");
-                $stmtCheck->execute(['fingerprint' => $order['fingerprint']]);
-                $existingId = $stmtCheck->fetchColumn();
+                $stmtSum->execute(['fingerprint' => $order['fingerprint']]);
+                $assigned = $stmtSum->fetch(PDO::FETCH_ASSOC);
 
-                if ($existingId !== false) {
-                    // Fall A: Bereits aktiv vorhanden -> Nur den "Zuletzt gesehen"-Zeitstempel erneuern
-                    $stmtUpdate = $this->pdo->prepare("UPDATE orders SET last_seen_at = NOW() WHERE id = ?");
-                    $stmtUpdate->execute([(int)$existingId]);
-                } else {
-                    // Fall B: Neuer Auftrag -> Datensatz persistent anlegen
-                    $stmtInsert = $this->pdo->prepare("
-                        INSERT INTO orders (fingerprint, freight_type, commodity, is_adr, weight_total, weight_remaining, revenue, from_city_id, to_city_id, is_accepted, is_archived, last_seen_at)
-                        VALUES (:fingerprint, :freight_type, :commodity, :is_adr, :weight, :weight, :revenue, :from_city, :to_city, 0, 0, NOW())
-                    ");
-                    $stmtInsert->execute([
-                        'fingerprint' => $order['fingerprint'],
-                        'freight_type' => $order['freight_type'],
-                        'commodity' => $order['commodity'],
-                        'is_adr' => $order['is_adr'],
-                        'weight' => $order['weight_total'],
-                        'revenue' => $order['revenue'],
-                        'from_city' => $order['from_city_id'],
-                        'to_city' => $order['to_city_id']
-                    ]);
+                $assignedWeight = (int)($assigned['assigned_weight'] ?? 0);
+                $assignedRevenue = (float)($assigned['assigned_revenue'] ?? 0);
+
+                // Reale verbleibende Pool-Mengen nach Abzug berechnen
+                $originalWeight = (int)$order['weight_total'];
+                $originalRevenue = (float)$order['revenue'];
+
+                $remainingWeight = $originalWeight - $assignedWeight;
+                $remainingRevenue = max(0.0, $originalRevenue - $assignedRevenue);
+
+                // Falls die Tonnage bereits vollständig auf LKW verplant wurde, überspringen wir die Neuanlage des Restpostens
+                if ($remainingWeight <= 0) {
+                    $importedCount++;
+                    continue;
                 }
+
+                // 3. SCHRITT: Neuanlage des bereinigten Restpostens im Pool
+                $stmtInsert = $this->pdo->prepare("
+                    INSERT INTO orders (
+                        fingerprint, freight_type, commodity, is_adr, 
+                        weight_total, weight_remaining, revenue, 
+                        from_city_id, to_city_id, is_accepted, is_archived, last_seen_at
+                    ) VALUES (
+                        :fingerprint, :freight_type, :commodity, :is_adr, 
+                        :weight_total, :weight_remaining, :revenue, 
+                        :from_city, :to_city, 0, 0, NOW()
+                    )
+                ");
+                $stmtInsert->execute([
+                    'fingerprint' => $order['fingerprint'],
+                    'freight_type' => $order['freight_type'],
+                    'commodity' => $order['commodity'],
+                    'is_adr' => $order['is_adr'],
+                    'weight_total' => $originalWeight,      // Behält das ungeteilte Ingame-Gewicht (z. B. 43 t)
+                    'weight_remaining' => $remainingWeight,  // Reduziert um verplante Mengen (z. B. 17 t)
+                    'revenue' => $remainingRevenue,          // Reduziert um verplante Erlöse (z. B. 1.673,71 €)
+                    'from_city' => $order['from_city_id'],
+                    'to_city' => $order['to_city_id']
+                ]);
+
                 $importedCount++;
             }
 
