@@ -176,23 +176,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
                 }
             }
             // -------------------------------------------------------------
-            // AUTO-ARCHIVIERUNG & AUTOMATISCHE TOUREN-FORTSCHREIBUNG (PH § 8)
-            // KORREKTUR: "Wenn eingeplant, dann eingeplant!" - Keine automatischen Stornos mehr!
+            // AUTO-ARCHIVIERUNG & TOUREN-FORTSCHREIBUNG (PH § 8)
+            // KORREKTUR: Basis-IDN-Abgleich zur split-sicheren Ghost-Tour-Bereinigung!
             // -------------------------------------------------------------
-            $stmtDisappeared = $pdo->prepare("
+            
+            // 1. Alle im aktuellen Import gesichteten Basis-IDNs sammeln (ohne künstliche Split-Suffixe)
+            $importedBaseIdns = [];
+            foreach ($parsedOrders as $order) {
+                if (!empty($order['ingame_order_id'])) {
+                    // Extrahiert den Teil vor dem Bindestrich (z.B. IDN10688810)
+                    $base = explode('-', $order['ingame_order_id'])[0];
+                    $importedBaseIdns[] = strtoupper(trim($base));
+                }
+            }
+            $importedBaseIdns = array_unique($importedBaseIdns);
+
+            // 2. Alle aktuell aktiven, unarchivierten Lageraufträge aus der DB laden
+            $activeDbOrders = $pdo->query("
                 SELECT id, ingame_order_id, to_city_id, assigned_truck_id 
                 FROM orders 
                 WHERE is_accepted = 1 
                   AND is_archived = 0 
-                  AND (last_seen_at < :import_start OR last_seen_at IS NULL)
-            ");
-            $stmtDisappeared->execute(['import_start' => $importStartTime]);
-            $disappearedOrders = $stmtDisappeared->fetchAll(PDO::FETCH_ASSOC);
+                  AND ingame_order_id IS NOT NULL
+            ")->fetchAll(PDO::FETCH_ASSOC);
+
+            // 3. Ermitteln, welche Aufträge wirklich aus dem Spiel verschwunden sind
+            // Ein verplanter LKW-Job (Klon) darf nur archiviert werden, wenn seine Basis-IDN nicht mehr im Import existiert
+            $disappearedOrders = [];
+            foreach ($activeDbOrders as $dbOrd) {
+                $dbBaseIdn = strtoupper(explode('-', $dbOrd['ingame_order_id'])[0]);
+                if (!in_array($dbBaseIdn, $importedBaseIdns, true)) {
+                    $disappearedOrders[] = $dbOrd;
+                }
+            }
 
             $archivedWarehouseCount = 0;
             foreach ($disappearedOrders as $disp) {
                 // Wenn der erledigte Auftrag einem LKW zugewiesen war, hat der LKW ihn geliefert.
-                // Wir verschieben den LKW-Standort automatisch an das Ziel dieses gelieferten Jobs.
+                // Wir verschieben den LKW-Standort automatisch an das Ziel dieses gelieferten Jobs (PH § 8.3)
                 if ($disp['assigned_truck_id']) {
                     $stmtMoveTruck = $pdo->prepare("
                         UPDATE trucks 

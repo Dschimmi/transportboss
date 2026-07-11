@@ -39,5 +39,8 @@ declare(strict_types=1);
         
         <!-- Gebrauchtwagenmarkt (Fahrzeughandel-Import) -->
         <a href="market_vehicles.php">Fahrzeugmarkt</a>
+
+        <!-- Die globale Spieler-Rangliste und Konkurrenzüberwachung -->
+        <a href="ranking_manager.php">Rangliste</a>
     </div>
 </nav>
