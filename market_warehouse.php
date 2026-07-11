@@ -40,39 +40,62 @@ class WarehouseSynchronizer
 
     /**
      * Synchronisiert einen parsten Lagerauftrag mit der Datenbank.
-     * Führt eine "Heirat" mit einem passenden Börsenauftrag durch, aktualisiert bestehende oder legt diese neu an.
-     *
-     * @param array $order Der parste Auftragsdatensatz
-     * @return int 1 = frisch verheiratet, 2 = bereits existent (aktualisiert), 3 = autonom neu angelegt
-     */
-    /**
-     * Synchronisiert einen parsten Lagerauftrag mit der Datenbank.
      * Führt eine "Heirat" mit einem aktiven oder archivierten Börsenauftrag durch.
      *
+     * KORREKTUR:
+     * - Behebt die Duplicate-Entry Integrity-Vulnerability (HY093/1062) durch globale Vorabprüfung!
+     * - Schützt verplante LKW-Tonnagen vor Überschreibung (weight_remaining wird nicht auf 0 gesetzt)
+     * - Verhindert Geister-Archivierungen durch fortlaufende last_seen_at Updates für verplante LKW-Jobs
+     *
      * @param array $order Der parste Auftragsdatensatz
-     * @return int 1 = frisch verheiratet/reaktiviert, 2 = bereits existent, 3 = autonom neu angelegt
+     * @return int 1 = frisch verheiratet/reaktiviert, 2 = bereits existent, 3 = autonom neu angelegt, 4 = übersprungen
      */
     public function syncOrder(array $order): int
     {
-        // 1. DUBLETTEN-SCHUTZ: Prüfen, ob die IDN bereits im System existiert (PH 2.5.1.3 & 3.4.1)
-        $stmtCheckIDN = $this->pdo->prepare("SELECT id FROM orders WHERE ingame_order_id = ? LIMIT 1");
+        // 1. DUBLETTEN-SCHUTZ: Prüfen, ob die IDN bereits global im System existiert (PH 2.5.1.3)
+        $stmtCheckIDN = $this->pdo->prepare("SELECT id, assigned_truck_id FROM orders WHERE ingame_order_id = ? LIMIT 1");
         $stmtCheckIDN->execute([$order['ingame_order_id']]);
-        $existingWarehouseId = $stmtCheckIDN->fetchColumn();
+        $existingOrder = $stmtCheckIDN->fetch(PDO::FETCH_ASSOC);
 
-        if ($existingWarehouseId !== false) {
-            // Fall 1: IDN existiert bereits -> Nur das verbleibende Restgewicht, Zeitstempel und Aktiv-Status aktualisieren (heilt Altdaten!)
-            $stmtUpdateWarehouse = $this->pdo->prepare("
-                UPDATE orders 
-                SET weight_remaining = ?, 
-                    last_seen_at = NOW(),
-                    is_archived = 0
-                WHERE id = ?
-            ");
-            $stmtUpdateWarehouse->execute([$order['weight_remaining'], (int)$existingWarehouseId]);
-            return 2; // Code 2: Bereits erfasst, restliches Gewicht aktualisiert
+        if ($existingOrder !== false) {
+            $existingId = (int)$existingOrder['id'];
+            $assignedTruckId = $existingOrder['assigned_truck_id'];
+
+            if ($assignedTruckId !== null) {
+                // Fall A: IDN ist bereits auf einem LKW geladen.
+                // Wir schützen die verplante Tonnage (weight_remaining bleibt UNBERÜHRT!),
+                // aktualisieren aber den Zeitstempel, damit das LKW-Segment nicht fälschlicherweise archiviert wird.
+                $stmtUpdateAssigned = $this->pdo->prepare("
+                    UPDATE orders 
+                    SET last_seen_at = NOW(),
+                        is_archived = 0
+                    WHERE id = ?
+                ");
+                $stmtUpdateAssigned->execute([$existingId]);
+                return 2; // Code 2: Zeitstempel aktualisiert (Tonnage geschützt!)
+            } else {
+                // Fall B: IDN liegt unverplant im Lagerpool.
+                // Wir aktualisieren die verbleibende Tonnage und den Zeitstempel last_seen_at.
+                $stmtUpdatePool = $this->pdo->prepare("
+                    UPDATE orders 
+                    SET weight_remaining = ?, 
+                        last_seen_at = NOW(),
+                        is_archived = 0
+                    WHERE id = ?
+                ");
+                $stmtUpdatePool->execute([$order['weight_remaining'], $existingId]);
+                return 2; // Code 2: Pool-Restmenge aktualisiert
+            }
         }
 
-        // 2. IDN existiert noch nicht. Versuche einen passenden Börsenauftrag zu heiraten.
+        // 2. IDN existiert noch nicht im System.
+        // Wenn die verbleibende Menge im Ingame-Lager bereits 0 ist, existiert kein aktiver Pool-Rest.
+        // Wir überspringen die Neuanlage komplett, um unbrauchbaren Datenmüll zu vermeiden.
+        if ((int)$order['weight_remaining'] <= 0) {
+            return 4; // Code 4: Übersprungen (Bereits vollständig auf LKWs verplant)
+        }
+
+        // 3. IDN existiert noch nicht. Versuche einen passenden Börsenauftrag zu heiraten.
         // KORREKTUR: Wir suchen in aktiven (is_archived = 0) UND archivierten (is_archived = 1) Aufträgen.
         // Sortiert aktive nach oben und wählt das jüngste passende Pendant aus.
         // KORREKTUR: Wir erlauben auch den Abgleich bereits zugewiesener (geladener) Börsenaufträge,
@@ -100,12 +123,12 @@ class WarehouseSynchronizer
         $matched = $stmtSearch->fetch(PDO::FETCH_ASSOC);
 
         if ($matched !== false) {
-            // Fall 2: Match gefunden -> Börsenauftrag verheiraten und aktivieren (auch falls er archiviert war!)
+            // Fall 3: Match gefunden -> Börsenauftrag verheiraten und aktivieren
             $stmtUpdate = $this->pdo->prepare("
                 UPDATE orders 
                 SET ingame_order_id = :idn,
                     is_accepted = 1,
-                    is_archived = 0, -- Setzt den archivierten Status im Bedarfsfall zurück
+                    is_archived = 0,
                     weight_remaining = :weight_remaining,
                     last_seen_at = NOW()
                 WHERE id = :id
@@ -118,10 +141,15 @@ class WarehouseSynchronizer
             return 1; // Code 1: Frisch verheiratet / Reaktiviert
         }
 
-        // Fall 3: Weder IDN noch passender Börsenauftrag existieren -> Autonome Neuanlage
+        // Fall 4: Weder IDN noch passender Börsenauftrag existieren -> Autonome Neuanlage
         $stmtInsert = $this->pdo->prepare("
-            INSERT INTO orders (ingame_order_id, freight_type, commodity, is_adr, weight_total, weight_remaining, revenue, from_city_id, to_city_id, is_accepted, is_archived, last_seen_at)
-            VALUES (:idn, :freight_type, :commodity, :is_adr, :weight_total, :weight_remaining, :revenue, :from_city, :to_city, 1, 0, NOW())
+            INSERT INTO orders (
+                ingame_order_id, freight_type, commodity, is_adr, weight_total, 
+                weight_remaining, revenue, from_city_id, to_city_id, is_accepted, is_archived, last_seen_at
+            ) VALUES (
+                :idn, :freight_type, :commodity, :is_adr, :weight_total, 
+                :weight_remaining, :revenue, :from_city, :to_city, 1, 0, NOW()
+            )
         ");
         $stmtInsert->execute([
             'idn' => $order['ingame_order_id'],

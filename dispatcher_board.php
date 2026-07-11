@@ -95,19 +95,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $info = $stmtInfo->fetch(PDO::FETCH_ASSOC);
     
     if ($info && $info['assigned_truck_id'] && $info['assigned_at']) {
-        // 2. Kaskaden-Storno: Entkopple diesen Auftrag sowie alle nachfolgend geplanten Aufträge des LKW
-        $stmtCascade = $pdo->prepare("
-            UPDATE orders 
-            SET assigned_truck_id = NULL, 
-                assigned_at = NULL 
-            WHERE assigned_truck_id = :truck_id 
+        $truckId = (int)$info['assigned_truck_id'];
+        $assignedAt = $info['assigned_at'];
+
+        // 2. MINIMALINVASIVE SCHNITTSTELLE:
+        // Wir laden alle betroffenen Folge-Aufträge dieser Tour chronologisch, um verplante
+        // Split-Klone sauber zu löschen und ihre Tonnagen sicher zurückzuerstatten!
+        $stmtAffected = $pdo->prepare("
+            SELECT id, ingame_order_id, weight_total 
+            FROM orders 
+            WHERE assigned_truck_id = ? 
               AND is_archived = 0 
-              AND assigned_at >= :assigned_at
+              AND assigned_at >= ?
         ");
-        $stmtCascade->execute([
-            'truck_id' => (int)$info['assigned_truck_id'],
-            'assigned_at' => $info['assigned_at']
-        ]);
+        $stmtAffected->execute([$truckId, $assignedAt]);
+        $affectedOrders = $stmtAffected->fetchAll(PDO::FETCH_ASSOC);
+
+        $pdo->beginTransaction();
+        try {
+            foreach ($affectedOrders as $ord) {
+                $oId = (int)$ord['id'];
+                $idn = $ord['ingame_order_id'];
+
+                // Prüfen, ob es sich um einen Split-Klon handelt (IDN enthält einen Bindestrich, z.B. IDN10700463-6)
+                if ($idn !== null && str_contains($idn, '-')) {
+                    $baseIdn = explode('-', $idn)[0];
+                    $loadedWeight = (int)$ord['weight_total'];
+
+                    // A. Tonnage zurück in den unplanbaren Pool-Hauptauftrag überführen
+                    $stmtMergeBack = $pdo->prepare("
+                        UPDATE orders 
+                        SET weight_remaining = weight_remaining + ? 
+                        WHERE ingame_order_id = ? 
+                          AND is_archived = 0
+                    ");
+                    $stmtMergeBack->execute([$loadedWeight, $baseIdn]);
+
+                    // B. Den verwaisten Klon-Eintrag vollständig löschen (Vermeidung von Datenmüll)
+                    $stmtDeleteClone = $pdo->prepare("DELETE FROM orders WHERE id = ?");
+                    $stmtDeleteClone->execute([$oId]);
+                } else {
+                    // C. Normaler, vollständiger Auftrag: Einfach vom LKW entkoppeln
+                    $stmtUnassign = $pdo->prepare("
+                        UPDATE orders 
+                        SET assigned_truck_id = NULL, 
+                            assigned_at = NULL 
+                        WHERE id = ?
+                    ");
+                    $stmtUnassign->execute([$oId]);
+                }
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
     }
     
     header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
@@ -267,8 +309,8 @@ function getCitiesDistance(PDO $pdo, int $cityA, int $cityB): int {
 }
 
 
-// --- TOPOLOGY ENGINE: ROUND-ROBIN DISPATCHER & SPLITTING-ALGORITHMUS ---
-
+// --- TOPOLOGY ENGINE: ROUND-ROBIN DISPATCHER & SPLITTING-ALGORITHMUS (AUTOPILOT) ---
+// Extrahiert die aktiven Planungsfahrzeuge für die UI-Steuerung
 $activeTrucks = [];
 foreach ($allTrucks as $t) {
     if ((int)$t['is_active_planning'] === 1 && !empty($t['assigned_driver_id'])) {
@@ -276,187 +318,26 @@ foreach ($allTrucks as $t) {
     }
 }
 
-$virtualEndpoints = [];
-$suggestedChains = [];
-$truckDriversAdr = [];
-
-foreach ($activeTrucks as $t) {
-    // Letzten geplanten Endpunkt ermitteln
-    $lastOrderCity = $pdo->query("
-        SELECT to_city_id 
-        FROM orders 
-        WHERE assigned_truck_id = " . (int)$t['id'] . " AND is_archived = 0 
-        ORDER BY assigned_at DESC LIMIT 1
-    ")->fetchColumn();
-    
-    $virtualEndpoints[$t['id']] = $lastOrderCity ? (int)$lastOrderCity : (int)$t['current_city_id'];
-    $suggestedChains[$t['id']] = [];
-
-    $adrPermit = 0;
-    if (!empty($t['assigned_driver_id']) && isset($driverMap[$t['assigned_driver_id']])) {
-        $adrPermit = (int)$driverMap[$t['assigned_driver_id']]['adr_permit'];
-    }
-    $truckDriversAdr[$t['id']] = $adrPermit;
-}
-
-// Gesamten Pool an unverplanten Aufträgen laden (Lager + Börse)
-$rawOrders = $pdo->query("
-    SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
-    FROM orders o
-    JOIN cities c1 ON o.from_city_id = c1.id
-    JOIN cities c2 ON o.to_city_id = c2.id
-    WHERE o.is_archived = 0 AND o.assigned_truck_id IS NULL
-    ORDER BY o.is_accepted DESC, o.revenue DESC
-")->fetchAll(PDO::FETCH_ASSOC);
-
-// Virtueller Arbeits-Pool zur Einhaltung der Exklusivität und des Gewichtssplittings
-$virtualOrderPool = [];
-foreach ($rawOrders as $ro) {
-    $virtualOrderPool[] = [
-        'id' => (int)$ro['id'],
-        'ingame_order_id' => $ro['ingame_order_id'],
-        'freight_type' => $ro['freight_type'],
-        'commodity' => $ro['commodity'],
-        'is_adr' => (int)$ro['is_adr'],
-        'weight_total' => (int)$ro['weight_total'],
-        'weight_remaining' => (int)$ro['weight_remaining'],
-        'revenue' => (float)$ro['revenue'],
-        'from_city_id' => (int)$ro['from_city_id'],
-        'to_city_id' => (int)$ro['to_city_id'],
-        'from_city_name' => $ro['from_city_name'],
-        'to_city_name' => $ro['to_city_name'],
-        'is_accepted' => (int)$ro['is_accepted']
-    ];
-}
-
-// KORREKTUR: Slot-Zählung dublettenbereinigt ausführen (Splittings ignorieren)
-$warehouseCount = (int)$pdo->query("
-    SELECT (
-        SELECT COUNT(DISTINCT SUBSTRING_INDEX(ingame_order_id, '-', 1))
-        FROM orders
-        WHERE is_archived = 0
-          AND ingame_order_id IS NOT NULL
-          AND (is_accepted = 1 OR assigned_truck_id IS NOT NULL)
-    ) + (
-        SELECT COUNT(*)
-        FROM orders
-        WHERE is_archived = 0
-          AND ingame_order_id IS NULL
-          AND assigned_truck_id IS NOT NULL
-    )
-")->fetchColumn();
-
-$freeMarketSlots = max(0, $maxDispoSlots - $warehouseCount);
-$marketOrdersCount = 0;
-$maxRounds = 6;
-
-// --- FLOTTENWEITER PROXIMITY-OPTIMIERER (VERMEIDET LEERFAHRTEN GLOBAL) ---
-$maxTotalSteps = count($activeTrucks) * 6; // Maximale Gesamt-Schritte für die aktive Flotte
-$marketOrdersCount = 0;
-
-for ($step = 0; $step < $maxTotalSteps; $step++) {
-    $bestCandidate = null;
-    $bestTruckKey = null;
-
-    // Finde flottenweit den absolut nächsten und wirtschaftlichsten Anschluss-Transport
-    foreach ($activeTrucks as $truckKey => $t) {
-        $truckId = $t['id'];
-        
-        // Jedes Fahrzeug wird auf maximal 6 geplante Schritte begrenzt
-        if (count($suggestedChains[$truckId]) >= 6) {
-            continue;
-        }
-
-        $currentEndpoint = $virtualEndpoints[$truckId];
-        $driverAdr = $truckDriversAdr[$truckId];
-        $neighborhood = get3CityNeighborhood($pdo, $currentEndpoint);
-
-        foreach ($virtualOrderPool as $index => $op) {
-            if ($op['weight_remaining'] <= 0) continue;
-            if (!isFreightCompatible($t['vehicle_type'], $op['freight_type'])) continue;
-            if ($op['is_adr'] === 1 && $driverAdr === 0) continue;
-            if (!in_array($op['from_city_id'], $neighborhood, true)) continue;
-            
-            // Slot-Limitierung für Börsenaufträge einhalten
-            if ($op['is_accepted'] === 0 && $marketOrdersCount >= $freeMarketSlots) {
-                continue;
-            }
-
-            $emptyRunDist = getCitiesDistance($pdo, $currentEndpoint, $op['from_city_id']);
-            $profitability = $op['revenue'] / $op['weight_total'];
-
-            // Globales Ranking: Niedrigste Leerfahrt-Distanz steht über allem
-            if ($bestCandidate === null 
-                || $emptyRunDist < $bestCandidate['empty_run_dist'] 
-                || ($emptyRunDist === $bestCandidate['empty_run_dist'] && $profitability > $bestCandidate['profitability'])) {
-                
-                $bestCandidate = [
-                    'pool_index' => $index,
-                    'order' => $op,
-                    'empty_run_dist' => $emptyRunDist,
-                    'profitability' => $profitability
-                ];
-                $bestTruckKey = $truckKey;
-            }
-        }
-    }
-
-    // Wenn flottenweit ein optimaler nächster Schritt gefunden wurde, weise ihn zu
-    if ($bestCandidate !== null && $bestTruckKey !== null) {
-        $t = $activeTrucks[$bestTruckKey];
-        $truckId = $t['id'];
-        $poolIndex = $bestCandidate['pool_index'];
-        $orderToLoad = &$virtualOrderPool[$poolIndex];
-
-        // Teillieferungs-Splitting berechnen
-        // Verfügbares Gewicht vor dem Abzug für diesen Schritt sichern
-        $availableWeight = (int)$orderToLoad['weight_remaining'];
-
-        // Teillieferungs-Splitting berechnen
-        $loadedWeight = min($orderToLoad['weight_remaining'], (int)$t['capacity_t']);
-        $isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
-
-        $orderToLoad['weight_remaining'] -= $loadedWeight;
-
-        // In die Kette des jeweiligen LKW einhängen
-        $suggestedChains[$truckId][] = [
-            'order' => $orderToLoad,
-            'loaded_weight' => $loadedWeight,
-            'available_weight' => $availableWeight, // Sichert die Restmenge dieses Planungsschritts
-            'is_split' => $isSplit,
-            'empty_run_dist' => $bestCandidate['empty_run_dist'],
-            'status' => $orderToLoad['is_accepted'] ? 'warehouse' : 'market'
-        ];
-
-        // Virtuellen Endpunkt dieses LKW aktualisieren
-        $virtualEndpoints[$truckId] = $orderToLoad['to_city_id'];
-
-        if ($orderToLoad['is_accepted'] === 0) {
-            $marketOrdersCount++;
-        }
-    } else {
-        // Keine weiteren kompatiblen Zuweisungen für irgendeinen LKW mehr möglich
-        break;
-    }
-}
+// Holt die berechneten Ketten direkt über die einheitliche, gekapselte Klassen-Methode (PH § 1.3.1)
+$suggestedChains = $topologyEngine->calculateAutopilotChains();
 
 // Ermittlung absoluter Inkompatibilitäten für das visuelle Alarm-System (PH 4.4.5)
+// Unabhängige, performante Echtzeit-Abfrage ohne Alt-Abhängigkeiten!
 $activeTruckAlerts = [];
+$unassignedOrdersForAlert = $pdo->query("
+    SELECT freight_type, is_adr 
+    FROM orders 
+    WHERE is_archived = 0 
+      AND assigned_truck_id IS NULL 
+      AND weight_remaining > 0
+")->fetchAll(PDO::FETCH_ASSOC);
+
 foreach ($activeTrucks as $at) {
     $hasAnyCompatible = false;
     $driverHasAdr = isset($driverMap[$at['assigned_driver_id']]) ? (bool)$driverMap[$at['assigned_driver_id']]['adr_permit'] : false;
     
-    // Typen-Alias-Mapping
-    $mappedFreightTypes = [$at['vehicle_type']];
-    if ($at['vehicle_type'] === 'Plane') $mappedFreightTypes[] = 'Plane(Wetterschutz)';
-    elseif ($at['vehicle_type'] === 'Koffer') $mappedFreightTypes[] = 'Kofferwagen';
-    elseif ($at['vehicle_type'] === 'Kühlwagen') $mappedFreightTypes[] = 'Kühlwaren';
-    elseif ($at['vehicle_type'] === 'Tankwagen') $mappedFreightTypes[] = 'Flüssigkeiten';
-    elseif ($at['vehicle_type'] === 'Silo') $mappedFreightTypes[] = 'Silotransport Silo';
-    elseif ($at['vehicle_type'] === 'Schüttgut') $mappedFreightTypes[] = 'Schüttgutt Schüttgut';
-    
-    foreach ($virtualOrderPool as $o) {
-        if ($o['weight_remaining'] > 0 && isFreightCompatible($at['vehicle_type'], $o['freight_type'])) {
+    foreach ($unassignedOrdersForAlert as $o) {
+        if (isFreightCompatible($at['vehicle_type'], $o['freight_type'])) {
             if ($o['is_adr'] === 0 || $driverHasAdr) {
                 $hasAnyCompatible = true;
                 break;
@@ -729,7 +610,7 @@ if ($focusTruck) {
                                             <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
                                             <td>' . htmlspecialchars($order['from_city_name']) . ' ➔ ' . htmlspecialchars($order['to_city_name']) . '</td>
                                             <td>' . $jobDistance . ' km</td>
-                                            <td>' . $order['weight_total'] . ' t / ' . $availableAtLoading . ' t</td>
+                                            <td>' . $order['weight_remaining'] . ' t / ' . $availableAtLoading . ' t</td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
                                                 <!-- Entladen-Button ganz rechts -->

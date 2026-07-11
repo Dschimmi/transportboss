@@ -5,17 +5,29 @@ declare(strict_types=1);
  * orders_view.php
  *
  * Sichtensteuerung für die Frachtbörse (unverplante Pool-Aufträge).
- * Lädt offene Angebote, berechnet live die Rentabilität (€/km) über den DistanceService,
- * vergleicht diese mit den historischen Durchschnittserlösen der jeweiligen Warenkategorie,
- * deklariert eine farbliche Marge-Klasse und filtert über Multi-Vehicle-Select sowie Gewichtsspannen.
+ * Erweitert zu einem intelligenten Dispositions-Leitstand:
+ * - Filter-Reparatur für "Min. €/km:"
+ * - Autopilot-Vorschlags-Brücke: Highlights für exklusiv eingeplante Autopilot-Frachten [DISPO-VORSCHLAG] (Chronologisch sortiert!)
+ * - Automatische Highlight-Kennzeichnung für Mangel-Standorte [FEHLT-AUSGLEICH]
+ * - Dreistufige, strategische Prioritäts-Sortierung
  *
  * @author TransportBoss Development
- * @version 1.4.0
+ * @version 2.3.0
  */
 
 // Zentrale Abhängigkeiten laden
 require_once 'db_connect.php';
 require_once 'classes/DistanceService.php';
+require_once 'classes/TopologyEngine.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Flash-Feedback aus dem market_pool Importer empfangen (Automatischer Redirect!)
+$message = $_SESSION['pb_pool_message'] ?? '';
+$messageClass = $_SESSION['pb_pool_message_class'] ?? '';
+unset($_SESSION['pb_pool_message'], $_SESSION['pb_pool_message_class']);
 
 /**
  * OrdersViewController
@@ -77,10 +89,10 @@ class OrdersViewController
      */
     public function getProfitabilityRanking(array $historicalAverages): array
     {
-        // 1. Offene Börsen-Aufträge (is_accepted = 0, is_archived = 0) laden
+        // Offene Börsen-Aufträge (is_accepted = 0, is_archived = 0) laden (ID für Dispo-Abgleich hinzugefügt!)
         $stmt = $this->pdo->query("
             SELECT 
-                o.freight_type, o.commodity, o.is_adr, o.weight_total, o.revenue,
+                o.id, o.freight_type, o.commodity, o.is_adr, o.weight_total, o.revenue,
                 c1.name AS from_city, c1.id AS from_id,
                 c2.name AS to_city, c2.id AS to_id
             FROM orders o
@@ -93,7 +105,7 @@ class OrdersViewController
         // Globaler Fallback-Wert, falls für eine Ware noch kein historischer Wert vorliegt (2.50 €/km)
         $globalAvg = !empty($historicalAverages) ? array_sum($historicalAverages) / count($historicalAverages) : 2.50;
 
-        // 2. Ertrags-Kilometer-Marge live und on the fly kalkulieren
+        // Ertrags-Kilometer-Marge live und on the fly kalkulieren
         foreach ($orders as &$order) {
             $km = $this->distanceService->getDistance((int)$order['from_id'], (int)$order['to_id']);
             $order['km'] = $km;
@@ -123,9 +135,6 @@ class OrdersViewController
         }
         unset($order); // Referenz aufheben
 
-        // 3. Absteigend sortieren (lukrativste zuerst)
-        usort($orders, fn($a, $b) => $b['eur_per_km'] <=> $a['eur_per_km']);
-
         return $orders;
     }
 }
@@ -136,17 +145,81 @@ $controller = new OrdersViewController($pdo, $distanceService);
 $historicalAverages = $controller->getHistoricalAverages();
 $rankedOrders = $controller->getProfitabilityRanking($historicalAverages);
 
-// Daten für die Dropdown-Filter extrahieren (Einzigartige Werte sammeln)
+// -------------------------------------------------------------
+// CHRONOLOGISCHE AUTOPILOT-BRÜCKE & LEITSTAND-DIAGNOSTIK
+// -------------------------------------------------------------
+
+// A. Mangel-Städte (FEHLT-Ausgleich) ermitteln über den CityService (PH § 1.3.1)
+require_once 'classes/CityService.php';
+$cityServiceForPr = new CityService($pdo);
+$missingCities = $cityServiceForPr->getEmptyWarehouseCities();
+
+// B. Von aktiven LKW empfohlene Marktpool-Aufträge (DISPO-VORSCHLAG) ermitteln (NUR AUTOPILOT CHRONOLOGISCH!)
+$recommendedIds = [];
+$recommendedOrderIndices = []; // Speichert die chronologische Reihenfolge für die korrekte Sortierung
+
+$activeTrucks = $pdo->query("
+    SELECT id, current_city_id, vehicle_type, capacity_t, assigned_driver_id 
+    FROM trucks 
+    WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
+")->fetchAll(PDO::FETCH_ASSOC);
+
+if (!empty($activeTrucks)) {
+    $topologyEngine = new TopologyEngine($pdo, $distanceService);
+
+    // Berechne die globalen Ketten über die einheitliche Klassen-Methode (Redundanzfrei!)
+    $suggestedChains = $topologyEngine->calculateAutopilotChains();
+
+    foreach ($suggestedChains as $truckId => $chain) {
+        foreach ($chain as $step) {
+            // Nur Marktpool-Aufträge werden für den Leitstand ausgewertet
+            if ($step['status'] === 'market') {
+                $orderId = (int)$step['order']['id'];
+                $recommendedIds[] = $orderId;
+                
+                // Chronologischen Index für dieses Auftragssegment registrieren
+                if (!isset($recommendedOrderIndices[$orderId])) {
+                    $recommendedOrderIndices[$orderId] = count($recommendedOrderIndices);
+                }
+            }
+        }
+    }
+}
+$recommendedIds = array_unique($recommendedIds);
+
+// C. Prioritäten und Reihenfolgen-Index vergeben
+foreach ($rankedOrders as &$o) {
+    $oId = (int)$o['id'];
+    $o['is_recommended_priority'] = in_array($oId, $recommendedIds, true) ? 1 : 0;
+    // Nicht empfohlene Aufträge erhalten einen unendlich hohen Index, damit sie hinten anstehen
+    $o['recommended_index'] = $recommendedOrderIndices[$oId] ?? 999999;
+    $o['is_missing_priority'] = in_array($o['from_city'], $missingCities, true) ? 1 : 0;
+}
+unset($o);
+
+// Drei-Stufen-Priorität mit chronologischem Index-Filter
+usort($rankedOrders, function($a, $b) {
+    if ($a['is_recommended_priority'] !== $b['is_recommended_priority']) {
+        return $b['is_recommended_priority'] <=> $a['is_recommended_priority'];
+    }
+    // Wenn beide empfohlen sind, sortiere nach der chronologischen Fahrtreihenfolge (ASC!)
+    if ($a['is_recommended_priority'] === 1 && $a['recommended_index'] !== $b['recommended_index']) {
+        return $a['recommended_index'] <=> $b['recommended_index'];
+    }
+    if ($a['is_missing_priority'] !== $b['is_missing_priority']) {
+        return $b['is_missing_priority'] <=> $a['is_missing_priority'];
+    }
+    return $b['eur_per_km'] <=> $a['eur_per_km'];
+});
+
+// Daten für die Dropdown-Filter extrahieren
 $uniqueStarts = array_unique(array_column($rankedOrders, 'from_city'));
 $uniqueZiels = array_unique(array_column($rankedOrders, 'to_city'));
-
 sort($uniqueStarts);
 sort($uniqueZiels);
 
-// Die 12 offiziellen Fahrzeugklassen laut Pflichtenheft (PH § 2.4.1.4)
 $allowedTruckTypes = ['Kurier', 'Stückgut', 'Schüttgut', 'Pritsche', 'Plane', 'Koffer', 'Kühlwagen', 'Silo', 'Tankwagen', 'Schwertransport', 'ISO-Container', 'Super-Liner'];
 
-// Hilfsfunktion zur Normalisierung von Ingame-Frachtbezeichnungen auf unsere 12 Klassen
 $normalizeFreight = function(string $type): string {
     $lower = strtolower($type);
     if (str_contains($lower, 'silo')) return 'Silo';
@@ -176,9 +249,13 @@ $normalizeFreight = function(string $type): string {
         
         <!-- Header mit Link zum Börsen-Import -->
         <div class="workspace-header-row">
-            <h1 class="accent-text">Lukrativste Aufträge (Pool)</h1>
+            <h1 class="accent-text">Börsen-Leitstand (Umsatz-Optimierung)</h1>
             <a href="market_pool.php" class="btn-primary">+ Börsen-Import (Angebote einlesen)</a>
         </div>
+
+        <?php if ($message): ?>
+            <div class="feedback-msg <?= $messageClass ?>"><?= htmlspecialchars($message) ?></div>
+        <?php endif; ?>
         
         <!-- REAKTIVE FILTER-BAR (Sauber nebeneinander über Flexbox) -->
         <div class="filter-panel">
@@ -222,7 +299,7 @@ $normalizeFreight = function(string $type): string {
                 <input type="text" id="tableFilter" class="filter-input" placeholder="Tabelle durchsuchen..." onkeyup="applyFilters()">
             </div>
 
-            <!-- MEHRFACHAUSWAHL FAHRZEUGTYPEN (Checkbox-Leiste) -->
+            <!-- MEHRFACHAUSWAHL FAHRZEUGTYPEN -->
             <div class="filter-group filter-vehicle-group">
                 <label>Benötigter Fahrzeugtyp (Mehrfachauswahl möglich):</label>
                 <div class="checkbox-filter-container">
@@ -255,10 +332,18 @@ $normalizeFreight = function(string $type): string {
                 data-from="<?php echo htmlspecialchars($o['from_city']); ?>" 
                 data-to="<?php echo htmlspecialchars($o['to_city']); ?>" 
                 data-freight-type="<?php echo htmlspecialchars($normalizeFreight($o['freight_type'])); ?>"
-                data-weight="<?php echo $o['weight_total']; ?>">
+                data-weight="<?php echo $o['weight_total']; ?>"
+                data-eur-per-km="<?php echo $o['eur_per_km']; ?>"> <!-- KORREKTUR: Filter-Attribut hinzugefügt! -->
                 <td><?php echo htmlspecialchars($o['from_city']); ?></td>
                 <td><?php echo htmlspecialchars($o['to_city']); ?></td>
                 <td>
+                    <!-- Strategische Leitstands-Hervorhebungen (PH-konforme Badges) -->
+                    <?php if ($o['is_recommended_priority']): ?>
+                        <span class="adr-badge" title="Dieser Auftrag wird aktiv im LKW-Fahrplan des Autopiloten empfohlen!">[DISPO-VORSCHLAG]</span>
+                    <?php endif; ?>
+                    <?php if ($o['is_missing_priority']): ?>
+                        <span class="badge-missing" title="Diese Stadt hat aktuell 0 Lager-Aufträge!">[FEHLT-AUSGLEICH]</span>
+                    <?php endif; ?>
                     <?php echo $o['is_adr'] ? '<span class="adr-badge">[ADR]</span>' : ''; ?>
                     <?php echo htmlspecialchars($o['commodity']); ?> (<?php echo htmlspecialchars($o['freight_type']); ?>)
                 </td>
@@ -319,7 +404,6 @@ $normalizeFreight = function(string $type): string {
 
         /**
          * Reaktive Multi-Filtersteuerung.
-         * Filtert gleichzeitig nach Start, Ziel, Mindesterlös, Gewichtsspanne, Text und MEHREREN Fahrzeugtypen (OR-Verknüpfung).
          */
         function applyFilters() {
             const startVal = document.getElementById('filterStart').value.toLowerCase();
@@ -329,12 +413,9 @@ $normalizeFreight = function(string $type): string {
             const maxWeightVal = parseFloat(document.getElementById('filterMaxWeight').value) || 999999;
             const searchVal = document.getElementById('tableFilter').value.toLowerCase();
 
-            // Sammelt alle aktivierten Fahrzeugtyp-Checkboxen
             const checkedVehicles = Array.from(document.querySelectorAll('.filter-vehicle-checkbox:checked')).map(cb => cb.value.toLowerCase());
 
             const rows = document.querySelectorAll('#sortableTable tbody tr');
-            
-            // Zerlegt den Freitext bei Leerzeichen für echte Multisearch-Verknüpfung
             const searchKeywords = searchVal.split(/\s+/).filter(k => k.trim() !== '');
 
             rows.forEach(row => {
@@ -345,16 +426,12 @@ $normalizeFreight = function(string $type): string {
                 const eurPerKm = parseFloat(row.getAttribute('data-eur-per-km')) || 0;
                 const textContent = row.textContent.toLowerCase();
 
-                // Evaluierung der Dropdown- und numerischen Filter
                 const matchStart = (startVal === '' || fromCity === startVal);
                 const matchZiel = (zielVal === '' || toCity === zielVal);
                 const matchMinKm = (eurPerKm >= minKmVal);
                 const matchWeight = (weight >= minWeightVal && weight <= maxWeightVal);
-
-                // Mehrfachauswahl-Filter
                 const matchVehicle = (checkedVehicles.length === 0 || checkedVehicles.includes(freightType));
 
-                // Evaluierung der Freitext-Multisearch (UND-Verknüpfung aller getippten Wörter)
                 let matchSearch = true;
                 for (let kw of searchKeywords) {
                     if (!textContent.includes(kw)) {
@@ -363,7 +440,6 @@ $normalizeFreight = function(string $type): string {
                     }
                 }
 
-                // Zeile ein- oder ausblenden
                 if (matchStart && matchZiel && matchMinKm && matchWeight && matchVehicle && matchSearch) {
                     row.classList.remove('hidden-row');
                 } else {
@@ -371,13 +447,9 @@ $normalizeFreight = function(string $type): string {
                 }
             });
 
-            // Filterzustand nach jeder Änderung persistent speichern
             saveFilterState();
         }
 
-        /**
-         * Automatisches Laden und Anwenden der Filter beim Betreten der Seite.
-         */
         window.addEventListener('DOMContentLoaded', () => {
             restoreFilterState();
             applyFilters();

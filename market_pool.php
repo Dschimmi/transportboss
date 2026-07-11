@@ -187,8 +187,22 @@ $viewData = [
     'parsed' => []
 ];
 
+// Session starten falls noch nicht aktiv (für die Weiterleitungsmeldungen)
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['import_data'])) {
     $viewData = $controller->import($_POST['import_data']);
+    
+    // KORREKTUR: Bei erfolgreichem Import leiten wir den Disponenten sofort 
+    // auf die Hauptübersicht der Frachtbörse (orders_view.php) weiter!
+    if ($viewData['messageClass'] === 'status-success') {
+        $_SESSION['pb_pool_message'] = $viewData['message'];
+        $_SESSION['pb_pool_message_class'] = $viewData['messageClass'];
+        header("Location: orders_view.php");
+        exit;
+    }
 }
 ?>
 <!DOCTYPE html>

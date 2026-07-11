@@ -66,4 +66,27 @@ class CityService
 
         return null;
     }
+    /**
+     * Ermittelt alle lizensierten Städte, die aktuell über 0 aktive, 
+     * unverplante Lager-Aufträge verfügen (Mangel-Städte / FEHLT).
+     *
+     * KORREKTUR: Vollständig gekapselt zur Vermeidung von SQL-Redundanz (PH § 1.3.1)
+     *
+     * @return array Liste der Städtenamen [string]
+     */
+    public function getEmptyWarehouseCities(): array
+    {
+        $stmt = $this->pdo->query("
+            SELECT c.name 
+            FROM cities c
+            LEFT JOIN orders o ON c.id = o.from_city_id 
+              AND o.is_accepted = 1 
+              AND o.is_archived = 0 
+              AND o.assigned_truck_id IS NULL
+            GROUP BY c.id
+            HAVING COUNT(o.id) = 0
+        ");
+        
+        return $stmt ? array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'name') : [];
+    }
 }
