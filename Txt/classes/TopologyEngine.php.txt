@@ -3,6 +3,11 @@ declare(strict_types=1);
 
 /**
  * TopologyEngine: Berechnet optimale Touren für Fahrzeuge nach der 3-Städte-Regel (PH 4.4).
+ * Kapselt die Autopilot- und Radar-Algorithmen zur systemweiten Code-Wiederverwendung.
+ * Integriert das taktische Tonnagen-Sperrenmodell (Anfraß- und Kehr-Logik).
+ *
+ * @author TransportBoss Development
+ * @version 2.6.0
  */
 class TopologyEngine
 {
@@ -16,16 +21,264 @@ class TopologyEngine
     }
 
     /**
-     * Findet die besten Auftragsvorschläge für ein Fahrzeug.
+     * Prüft, ob ein Auftrag (Restmenge) durch die Tonnagen-Restriktionen (Min/Max) eines LKW erlaubt ist.
+     * Falls die Restriktion verletzt wird, prüft das System über die "Typen-Sicherheits-Weiche" (PH § Exception),
+     * ob ein anderes Fahrzeug der gesamten Spedition diese Fracht transportieren könnte. Falls nein, wird die Sperre verworfen.
      *
-     * @param int $truckId Die ID des Fahrzeugs
-     * @param int $currentCityId Die aktuelle Stadt-ID des Fahrzeugs
-     * @return array Array mit Auftragsvorschlägen (sortiert nach Priorität)
+     * KORREKTUR:
+     * - Prüft die Weiche gegen die GESAMTE owned Flotte (nicht nur aktive LKW), da unbesetzte LKW trotzdem den Typ repräsentieren!
+     * - Prüft das RESTGEWICHT (weight_remaining) bei der Kapazitäts-Kollision, damit die Kleinen Reste-Wegkehren dürfen!
+     *
+     * @param array $order Der zu prüfende Auftragsdatensatz
+     * @param array $truck Der zu beplanende LKW
+     * @param array $allOwnedTrucks Die gesamte LKW-Flotte der Spedition
+     * @return bool True, wenn die Fracht geladen werden darf, sonst False
+     */
+    private function isOrderAllowedByWeight(array $order, array $truck, array $allOwnedTrucks): bool
+    {
+        $weight = (int)$order['weight_remaining'];
+        $min = (int)($truck['min_weight_t'] ?? 0);
+        $max = (int)($truck['max_weight_t'] ?? 0);
+
+        // 1. Standard-Gewichtsprüfung des aktuellen LKWs
+        $allowedByMin = ($weight >= $min);
+        $allowedByMax = ($max === 0 || $weight <= $max);
+
+        if ($allowedByMin && $allowedByMax) {
+            return true; // Die Restriktion wird gar nicht verletzt!
+        }
+
+        // 2. Die Restriktion wird verletzt. Wir aktivieren die Typen-Sicherheits-Weiche gegen alle owned LKW:
+        $anyOtherCanHaul = false;
+
+        foreach ($allOwnedTrucks as $otherTruck) {
+            if ((int)$otherTruck['id'] === (int)$truck['id']) {
+                continue;
+            }
+
+            // A. Physische Kompatibilität des anderen LKWs prüfen
+            if (!$this->isTypeCompatible($order['freight_type'], $otherTruck['vehicle_type'])) {
+                continue;
+            }
+
+            // B. Gewichtskapazität des anderen LKWs prüfen (KORREKTUR: verbleibendes Restgewicht prüfen!)
+            if ((int)$order['weight_remaining'] > (int)$otherTruck['capacity_t']) {
+                continue;
+            }
+
+            // C. Eigene Gewichts-Sperren des anderen LKWs prüfen
+            $otherMin = (int)($otherTruck['min_weight_t'] ?? 0);
+            $otherMax = (int)($otherTruck['max_weight_t'] ?? 0);
+            
+            $otherAllowedByMin = ($weight >= $otherMin);
+            $otherAllowedByMax = ($otherMax === 0 || $weight <= $otherMax);
+
+            if ($otherAllowedByMin && $otherAllowedByMax) {
+                $anyOtherCanHaul = true;
+                break; // Ein anderes Fahrzeug im Fuhrpark kann den Job regelkonform fahren!
+            }
+        }
+
+        // Falls kein anderes Fahrzeug diesen Job regelkonform fahren kann,
+        // verwerfen wir die Gewichts-Sperre für diesen LKW, damit der Job fahrbar bleibt!
+        if (!$anyOtherCanHaul) {
+            return true; // Sperre aufgehoben!
+        }
+
+        return false; // Sperre bleibt aktiv, da ein anderes Fahrzeug den Job regelkonform fahren kann.
+    }
+
+    /**
+     * Berechnet die flottenweiten Vorschlagsketten (Autopilot-Modus) nach dem
+     * Round-Robin-Verfahren und dem Proximity-Optimierungs-Algorithmus (PH § 9.2).
+     *
+     * KORREKTUR: Bereinigt von allen anonymen Closures (use $pdo unassigned Bug endgültig behoben!)
+     *
+     * @return array Assoziatives Array der Ketten [truck_id => [chain_steps]]
+     */
+    public function calculateAutopilotChains(): array
+    {
+        // 1. Alle für die Disposition aktivierten Fahrzeuge laden
+        $stmtTrucks = $this->pdo->query("
+            SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
+            FROM trucks 
+            WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
+        ");
+        $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($activeTrucks)) {
+            return [];
+        }
+
+        // Lade den gesamten owned Fuhrpark zur Auswertung der Tonnagen-Sicherheitsweiche
+        $stmtAllOwned = $this->pdo->query("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks");
+        $allOwnedTrucks = $stmtAllOwned->fetchAll(PDO::FETCH_ASSOC);
+
+        // 2. Map der Fahrer-ADR-Status aufbauen
+        $stmtDrivers = $this->pdo->query("SELECT ingame_driver_id, adr_permit FROM drivers WHERE is_employed = 1");
+        $driverAdrMap = [];
+        while ($row = $stmtDrivers->fetch(PDO::FETCH_ASSOC)) {
+            $driverAdrMap[$row['ingame_driver_id']] = (int)$row['adr_permit'];
+        }
+
+        $virtualEndpoints = [];
+        $suggestedChains = [];
+        $truckDriversAdr = [];
+
+        foreach ($activeTrucks as $t) {
+            $lastOrderCity = $this->pdo->query("
+                SELECT to_city_id 
+                FROM orders 
+                WHERE assigned_truck_id = " . (int)$t['id'] . " AND is_archived = 0 
+                ORDER BY assigned_at DESC LIMIT 1
+            ")->fetchColumn();
+            
+            $virtualEndpoints[$t['id']] = $lastOrderCity ? (int)$lastOrderCity : (int)$t['current_city_id'];
+            $suggestedChains[$t['id']] = [];
+            $truckDriversAdr[$t['id']] = $driverAdrMap[$t['assigned_driver_id']] ?? 0;
+        }
+
+        // 3. Pool an unverplanten Aufträgen laden (nur offene Tonnagen weight_remaining > 0!)
+        $rawOrders = $this->pdo->query("
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+            FROM orders o
+            JOIN cities c1 ON o.from_city_id = c1.id
+            JOIN cities c2 ON o.to_city_id = c2.id
+            WHERE o.is_archived = 0 AND o.assigned_truck_id IS NULL AND o.weight_remaining > 0
+            ORDER BY o.is_accepted DESC, o.revenue DESC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        $virtualOrderPool = [];
+        foreach ($rawOrders as $ro) {
+            $virtualOrderPool[] = [
+                'id' => (int)$ro['id'],
+                'ingame_order_id' => $ro['ingame_order_id'],
+                'freight_type' => $ro['freight_type'],
+                'commodity' => $ro['commodity'],
+                'is_adr' => (int)$ro['is_adr'],
+                'weight_total' => (int)$ro['weight_total'],
+                'weight_remaining' => (int)$ro['weight_remaining'],
+                'revenue' => (float)$ro['revenue'],
+                'from_city_id' => (int)$ro['from_city_id'],
+                'to_city_id' => (int)$ro['to_city_id'],
+                'from_city_name' => $ro['from_city_name'],
+                'to_city_name' => $ro['to_city_name'],
+                'is_accepted' => (int)$ro['is_accepted']
+            ];
+        }
+
+        // 4. Slot-Zählung & Limitbestimmung (splitting-resistent)
+        $warehouseCount = (int)$this->pdo->query("
+            SELECT (
+                SELECT COUNT(DISTINCT SUBSTRING_INDEX(ingame_order_id, '-', 1))
+                FROM orders
+                WHERE is_archived = 0
+                  AND ingame_order_id IS NOT NULL
+                  AND (is_accepted = 1 OR assigned_truck_id IS NOT NULL)
+            ) + (
+                SELECT COUNT(*)
+                FROM orders
+                WHERE is_archived = 0
+                  AND ingame_order_id IS NULL
+                  AND assigned_truck_id IS NOT NULL
+            ) AS count
+        ")->fetchColumn();
+
+        $limitStmt = $this->pdo->query("SELECT cfg_value FROM config WHERE cfg_key = 'max_dispo_slots'");
+        $globalLimit = $limitStmt ? (int)$limitStmt->fetchColumn() : 26;
+        $freeMarketSlots = max(0, $globalLimit - $warehouseCount);
+
+        $maxTotalSteps = count($activeTrucks) * 6;
+        $marketOrdersCount = 0;
+
+        // 5. Flottenweiter Proximity-Optimierungs-Loop (Autopilot)
+        for ($step = 0; $step < $maxTotalSteps; $step++) {
+            $bestCandidate = null;
+            $bestTruckKey = null;
+
+            foreach ($activeTrucks as $truckKey => $t) {
+                $truckId = $t['id'];
+                if (count($suggestedChains[$truckId]) >= 6) {
+                    continue;
+                }
+
+                $currentEndpoint = $virtualEndpoints[$truckId];
+                $driverAdr = $truckDriversAdr[$truckId];
+                
+                // Nutzt die bereits existierende, klasseneigene Methode zur Nachbarschafts-Suche (keine unassigned closures!)
+                $neighborhood = $this->getNearestCities($currentEndpoint, 2);
+                $neighborhood[] = $currentEndpoint; // Füge aktuelle Position zum Radius hinzu
+
+                foreach ($virtualOrderPool as $index => $op) {
+                    if ($op['weight_remaining'] <= 0) continue;
+                    if (!$this->isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
+                    if ($op['is_adr'] === 1 && $driverAdr === 0) continue;
+                    if (!in_array($op['from_city_id'], $neighborhood, true)) continue;
+                    if ($op['is_accepted'] === 0 && $marketOrdersCount >= $freeMarketSlots) continue;
+
+                    // Tonnagen-Restriktionen & "Reste-Kehrlogik" prüfen (PH § Tonnage-Sperren)
+                    if (!$this->isOrderAllowedByWeight($op, $t, $allOwnedTrucks)) continue;
+
+                    // Nutzt das instanziierte distanceService-Objekt der Klasse
+                    $emptyRunDist = $this->distanceService->getDistance($currentEndpoint, $op['from_city_id']);
+                    $profitability = $op['revenue'] / $op['weight_total'];
+
+                    if ($bestCandidate === null 
+                        || $emptyRunDist < $bestCandidate['empty_run_dist'] 
+                        || ($emptyRunDist === $bestCandidate['empty_run_dist'] && $profitability > $bestCandidate['profitability'])) {
+                        
+                        $bestCandidate = [
+                            'pool_index' => $index,
+                            'order' => $op,
+                            'empty_run_dist' => $emptyRunDist,
+                            'profitability' => $profitability
+                        ];
+                        $bestTruckKey = $truckKey;
+                    }
+                }
+            }
+
+            if ($bestCandidate !== null && $bestTruckKey !== null) {
+                $t = $activeTrucks[$bestTruckKey];
+                $truckId = $t['id'];
+                $poolIndex = $bestCandidate['pool_index'];
+                $orderToLoad = &$virtualOrderPool[$poolIndex];
+
+                $loadedWeight = min($orderToLoad['weight_remaining'], (int)$t['capacity_t']);
+                $isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
+                $availableWeight = (int)$orderToLoad['weight_remaining'];
+
+                $orderToLoad['weight_remaining'] -= $loadedWeight;
+
+                $suggestedChains[$truckId][] = [
+                    'order' => $orderToLoad,
+                    'loaded_weight' => $loadedWeight,
+                    'available_weight' => (int)$orderToLoad['weight_total'], // Zeigt die original Gesamttonnage (57 t) statt der Restmenge!
+                    'is_split' => $isSplit,
+                    'empty_run_dist' => $bestCandidate['empty_run_dist'],
+                    'status' => (int)$orderToLoad['is_accepted'] === 1 ? 'warehouse' : 'market'
+                ];
+
+                $virtualEndpoints[$truckId] = $orderToLoad['to_city_id'];
+
+                if ($orderToLoad['is_accepted'] === 0) {
+                    $marketOrdersCount++;
+                }
+            } else {
+                break;
+            }
+        }
+
+        return $suggestedChains;
+    }
+
+    /**
+     * Findet die besten Auftragsvorschläge für ein einzelnes Fahrzeug (Autopilot-Sicht).
      */
     public function getSuggestionsForTruck(int $truckId, int $currentCityId): array
     {
-        // 1. Fahrzeugdaten laden
-        $truckStmt = $this->pdo->prepare("SELECT capacity_t, vehicle_type FROM trucks WHERE id = :id");
+        // 1. Fahrzeugdaten laden (min_weight_t und max_weight_t mitladen!)
+        $truckStmt = $this->pdo->prepare("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks WHERE id = :id");
         $truckStmt->execute(['id' => $truckId]);
         $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -33,11 +286,13 @@ class TopologyEngine
             return [];
         }
 
-        // 2. Die 2 nächstgelegenen Städte zur aktuellen Stadt finden
+        // Lade alle owned LKWs zur Auswertung der Tonnagen-Sicherheitsweiche (PH § Exception)
+        $stmtAllOwned = $this->pdo->query("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks");
+        $allOwnedTrucks = $stmtAllOwned->fetchAll(PDO::FETCH_ASSOC);
+
         $neighborCities = $this->getNearestCities($currentCityId, 2);
         $relevantCityIds = array_merge([$currentCityId], $neighborCities);
 
-        // 3. Alle Aufträge in diesen Städten laden (Lager + Marktpool)
         $placeholders = implode(',', array_fill(0, count($relevantCityIds), '?'));
         $orderStmt = $this->pdo->prepare("
             SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
@@ -46,16 +301,15 @@ class TopologyEngine
             JOIN cities c2 ON o.to_city_id = c2.id
             WHERE o.from_city_id IN ($placeholders)
             AND o.is_archived = 0
+            AND o.weight_remaining > 0
             AND o.assigned_truck_id IS NULL
             ORDER BY o.from_city_id = ? DESC, (o.revenue / o.weight_total) DESC
         ");
 
-        // Füge currentCityId als letzten Parameter hinzu
         $params = array_merge($relevantCityIds, [$currentCityId]);
         $orderStmt->execute($params);
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // 4. Aufträge filtern (Typ, Kapazität, ADR)
         $suggestions = [];
         foreach ($orders as $order) {
             // Fahrzeugtyp prüfen
@@ -78,6 +332,11 @@ class TopologyEngine
                 continue;
             }
 
+            // Tonnagen-Restriktionen & "Reste-Kehrlogik" prüfen (PH § Tonnage-Sperren)
+            if (!$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks)) {
+                continue;
+            }
+
             $distanceToOrder = $this->distanceService->getDistance($currentCityId, $order['from_city_id']);
             $routeDistance = $this->distanceService->getDistance($order['from_city_id'], $order['to_city_id']);
             $suggestions[] = [
@@ -89,10 +348,15 @@ class TopologyEngine
             ];
         }
 
-        // 5. Fallback: Falls keine Aufträge in den 3 Städten gefunden wurden
+        // Fallback: Falls keine regionalen Vorschläge vorliegen
         if (empty($suggestions)) {
             $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t']);
             foreach ($fallbackOrders as $fallbackOrder) {
+                // Tonnagen-Restriktionen für Fallback prüfen
+                if (!$this->isOrderAllowedByWeight($fallbackOrder, $truck, $allOwnedTrucks)) {
+                    continue;
+                }
+
                 $distanceToOrder = $this->distanceService->getDistance($currentCityId, $fallbackOrder['from_city_id']);
                 $routeDistance = $this->distanceService->getDistance($fallbackOrder['from_city_id'], $fallbackOrder['to_city_id']);
                 $suggestions[] = [
@@ -105,7 +369,7 @@ class TopologyEngine
             }
         }
 
-        // 6. Nach Priorität sortieren
+        // Nach Priorität sortieren
         usort($suggestions, function($a, $b) {
             if ($a['distance_to_order'] !== $b['distance_to_order']) {
                 return $a['distance_to_order'] <=> $b['distance_to_order'];
@@ -118,10 +382,6 @@ class TopologyEngine
 
     /**
      * Findet die n nächstgelegenen Städte zu einer gegebenen Stadt.
-     *
-     * @param int $cityId Die Referenz-Stadt-ID
-     * @param int $limit Anzahl der Nachbarstädte
-     * @return array Array mit Stadt-IDs
      */
     private function getNearestCities(int $cityId, int $limit): array
     {
@@ -143,7 +403,7 @@ class TopologyEngine
     /**
      * Prüft, ob ein Frachttyp mit einem Fahrzeugtyp kompatibel ist (PH 3.3 Matrix-Abgleich).
      */
-    private function isTypeCompatible(string $freightType, string $vehicleType): bool
+    public function isTypeCompatible(string $freightType, string $vehicleType): bool
     {
         $normalize = function(string $type): string {
             $lower = strtolower($type);
@@ -168,7 +428,6 @@ class TopologyEngine
             return true;
         }
 
-        // Vollständige Kompatibilitätsmatrix aus dem Pflichtenheft (PH 3.3)
         $matrix = [
             'Kurier' => ['Kurier', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
             'Stückgut' => ['Stückgut', 'Kurier', 'Pritsche', 'Plane', 'Koffer'],
@@ -227,7 +486,6 @@ class TopologyEngine
 
         $compatibleNormalized = $matrix[$vType] ?? [$vType];
         
-        // Expansion auf Ingame-Synonyme zur präzisen Abdeckung in SQL
         $allPossibleTypes = [];
         foreach ($compatibleNormalized as $norm) {
             $allPossibleTypes[] = $norm;
@@ -247,9 +505,6 @@ class TopologyEngine
 
     /**
      * Prüft, ob das Fahrzeug einen Fahrer mit ADR-Erlaubnis hat.
-     *
-     * @param int $truckId Die Fahrzeug-ID
-     * @return bool
      */
     private function hasAdrDriverForTruck(int $truckId): bool
     {
@@ -266,8 +521,6 @@ class TopologyEngine
 
     /**
      * Prüft, ob freie Slots für Marktaufträge verfügbar sind (resistent gegen Splitting-Doubletten).
-     *
-     * @return bool
      */
     private function hasFreeSlots(): bool
     {
@@ -277,7 +530,6 @@ class TopologyEngine
             $globalLimit = 26;
         }
 
-        // Ermittelt die real belegten Slots (zusammengefasste Ingame-IDs ohne Split-Suffixes)
         $stmt = $this->pdo->query("
             SELECT (
                 SELECT COUNT(DISTINCT SUBSTRING_INDEX(ingame_order_id, '-', 1))
@@ -299,6 +551,7 @@ class TopologyEngine
 
     /**
      * Führt einen auf PH 3.3 basierenden globalen Scan durch, falls die 3-Städte-Regel keine Ergebnisse liefert.
+     * KORREKTUR: Berechnet die Anfahrtsdistanzen und sortiert STRENG nach der kürzesten Anfahrt (empty_run_dist) in PHP!
      *
      * @param int $truckId Die Fahrzeug-ID
      * @param string $vehicleType Der Fahrzeugtyp
@@ -307,6 +560,12 @@ class TopologyEngine
      */
     private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity): array
     {
+        // Hole die aktuelle Position des LKW für den Distanzabgleich
+        $stmtTruckCity = $this->pdo->prepare("SELECT current_city_id FROM trucks WHERE id = ?");
+        $stmtTruckCity->execute([$truckId]);
+        $truckInfo = $stmtTruckCity->fetch(PDO::FETCH_ASSOC);
+        $currentCityId = $truckInfo ? (int)$truckInfo['current_city_id'] : 0;
+
         $hasAdr = $this->hasAdrDriverForTruck($truckId);
         $compatibleTypes = $this->getCompatibleFreightTypes($vehicleType);
         
@@ -330,20 +589,49 @@ class TopologyEngine
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
             WHERE o.is_archived = 0
+            AND o.weight_remaining > 0
             AND o.freight_type IN ($placeholdersStr)
             AND o.weight_total <= :capacity
             AND (o.is_adr = 0 OR :has_adr = 1)
             AND o.assigned_truck_id IS NULL
-            ORDER BY (o.revenue / o.weight_total) DESC
-            LIMIT 10
+            LIMIT 20
         ");
         
         $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $fallbackOrders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $results = [];
+        foreach ($fallbackOrders as $fo) {
+            $distance = $this->distanceService->getDistance($currentCityId, (int)$fo['from_city_id']);
+            $fo['empty_run_dist'] = $distance;
+            $results[] = $fo;
+        }
+
+        // Sortiere streng nach der kürzesten Anfahrt (empty_run_dist ASC)
+        usort($results, function($a, $b) {
+            if ($a['empty_run_dist'] !== $b['empty_run_dist']) {
+                return $a['empty_run_dist'] <=> $b['empty_run_dist'];
+            }
+            $profitA = $a['revenue'] / max(1, (int)$a['weight_total']);
+            $profitB = $b['revenue'] / max(1, (int)$b['weight_total']);
+            return $profitB <=> $profitA;
+        });
+
+        return $results;
     }
+
     /**
      * Taktisches Radar: Findet ALLE kompatiblen Aufträge im 3-Städte-Radius (Auswahl-Garantie, PH § 9.3.4)
      * und bereichert sie um den vorausschauenden Ketten-Radar-Indikator.
+     *
+     * KORREKTUR:
+     * - Behebt den Call to undefined method isFreightCompatible Fehler durch Aufruf von isTypeCompatible (public geschaltet!)
+     * - Behebt den getCitiesDistance Fehler durch korrekten Aufruf des distanceService
+     * - Keine Vermischung von benannten und anonymen SQL-Parametern mehr
+     * - Prüft die Planungs-Checkbox (liefert [] bei is_active_planning = 0)
+     * - Sortiert die Frachten streng nach kürzester physischen Anfahrt (0 km zuerst)
+     * - Füllt die Vorschläge über die Fallback-Engine stabil auf mindestens 3 Optionen auf (Padding)
+     * - Schließt bereits verplante 0-Tonnen-Splitreste konsequent aus (weight_remaining > 0)
      *
      * @param int $truckId Die ID des LKW
      * @param int $currentCityId Start- oder Tourende-Stadt des LKW
@@ -351,17 +639,22 @@ class TopologyEngine
      */
     public function getRadarScanForTruck(int $truckId, int $currentCityId): array
     {
-        // 1. Fahrzeugdaten laden
-        $truckStmt = $this->pdo->prepare("SELECT capacity_t, vehicle_type FROM trucks WHERE id = ?");
+        // 1. Fahrzeugdaten und Planungsstatus auslesen (min_weight_t und max_weight_t mitladen!)
+        $truckStmt = $this->pdo->prepare("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t, is_active_planning FROM trucks WHERE id = ?");
         $truckStmt->execute([$truckId]);
         $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$truck) {
+        // Sicherheits-Check: Falls LKW nicht existiert oder nicht aktiv geschaltet ist, sofort abbrechen!
+        if (!$truck || (int)$truck['is_active_planning'] === 0) {
             return [];
         }
 
         $capacity = (int)$truck['capacity_t'];
         $vehicleType = $truck['vehicle_type'];
+
+        // Lade alle owned LKWs zur Auswertung der Tonnagen-Sicherheitsweiche (PH § Exception)
+        $stmtAllOwned = $this->pdo->query("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks");
+        $allOwnedTrucks = $stmtAllOwned->fetchAll(PDO::FETCH_ASSOC);
 
         // 2. Die 3-Städte-Nachbarschaft ermitteln
         $neighborCities = $this->getNearestCities($currentCityId, 2);
@@ -369,7 +662,7 @@ class TopologyEngine
 
         $placeholders = implode(',', array_fill(0, count($relevantCityIds), '?'));
         
-        // 3. Auswahl-Garantie: Alle regionalen passenden Aufträge auslesen (Limit auf 15 Einträge)
+        // 3. Regionale Suche im 3-Städte-Radius, sortiert nach kürzester Anfahrt (empty_run_dist ASC)
         $orderStmt = $this->pdo->prepare("
             SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
             FROM orders o
@@ -377,6 +670,7 @@ class TopologyEngine
             JOIN cities c2 ON o.to_city_id = c2.id
             WHERE o.from_city_id IN ($placeholders)
             AND o.is_archived = 0
+            AND o.weight_remaining > 0
             AND o.assigned_truck_id IS NULL
             ORDER BY o.from_city_id = ? DESC, (o.revenue / o.weight_total) DESC
             LIMIT 15
@@ -387,47 +681,53 @@ class TopologyEngine
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
 
         $radarScan = [];
+        $driverHasAdr = $this->hasAdrDriverForTruck($truckId);
+
         foreach ($orders as $order) {
-            // Kompatibilitäts-Checks (Fahrzeugtyp, ADR-Erlaubnis)
-            if (!$this->isTypeCompatible($order['freight_type'], $vehicleType)) {
-                continue;
-            }
+            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden
+            if (!$this->isTypeCompatible($order['freight_type'], $vehicleType)) continue;
 
-            if ($order['is_adr'] && !$this->hasAdrDriverForTruck($truckId)) {
-                continue;
-            }
+            if ($order['is_adr'] && !$driverHasAdr) continue;
 
-            // Slot-Prüfung für Marktaufträge
-            if (!$order['is_accepted'] && !$this->hasFreeSlots()) {
-                continue;
-            }
+            // Tonnagen-Sperren und "Reste-Kehrlogik" prüfen (PH § Tonnage-Sperren)
+            if (!$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks)) continue;
 
-            $distanceToOrder = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
-            $routeDistance = $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']);
-            
-            // Tonnagen und Split-Verhalten im Voraus ermitteln
+            $emptyRunDist = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
             $loadedWeight = min((int)$order['weight_remaining'], $capacity);
             $isSplit = (int)$order['weight_remaining'] > $capacity;
 
-            // Simuliert vorausschauend die Ketten-Tiefe ab dem Zielort (PH § 7)
+            // Simuliere die vorausschauende Kette (Radar-Stufe)
+            $radarIndicator = $this->simulateRadarChain((int)$order['to_city_id'], $truckId, $vehicleType, $capacity);
+
             $radarScan[] = [
                 'order' => $order,
                 'loaded_weight' => $loadedWeight,
-                'available_weight' => (int)$order['weight_remaining'],
+                'available_weight' => (int)$order['weight_total'], // KORREKTUR: Zeigt die original Gesamttonnage (57 t) statt der Restmenge!
                 'is_split' => $isSplit,
-                'empty_run_dist' => $distanceToOrder,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($routeDistance, 1)),
-                'is_fallback' => false,
-                'status' => $order['is_accepted'] ? 'warehouse' : 'market',
-                'radar_indicator' => $this->simulateRadarChain((int)$order['to_city_id'], $truckId, $vehicleType, $capacity)
+                'empty_run_dist' => $emptyRunDist,
+                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max(1, $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']))),
+                'status' => (int)$order['is_accepted'] === 1 ? 'warehouse' : 'market',
+                'radar_indicator' => $radarIndicator
             ];
         }
 
-        // 4. Globales Fallback: Falls im 3-Städte-Radius gar nichts existiert
-        if (empty($radarScan)) {
+        // 4. DIE 3er-GARANTIE (PADDING):
+        // Haben wir weniger als 3 regionale Ergebnisse, ziehen wir globale Alternativen hinzu,
+        // ebenfalls streng sortiert nach kürzester Anfahrt!
+        if (count($radarScan) < 3) {
             $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity);
+            $existingIds = array_column(array_column($radarScan, 'order'), 'id');
+
             foreach ($fallbackOrders as $fallbackOrder) {
-                $distanceToOrder = $this->distanceService->getDistance($currentCityId, (int)$fallbackOrder['from_city_id']);
+                // Keine Duplikate einfügen
+                if (in_array($fallbackOrder['id'], $existingIds, true)) {
+                    continue;
+                }
+
+                // Tonnagen-Restriktionen für Fallback prüfen
+                if (!$this->isOrderAllowedByWeight($fallbackOrder, $truck, $allOwnedTrucks)) continue;
+
+                $distanceToOrder = $fallbackOrder['empty_run_dist']; // Bereits in der Fallback-Engine berechnet!
                 $routeDistance = $this->distanceService->getDistance((int)$fallbackOrder['from_city_id'], (int)$fallbackOrder['to_city_id']);
                 
                 $loadedWeight = min((int)$fallbackOrder['weight_remaining'], $capacity);
@@ -436,7 +736,7 @@ class TopologyEngine
                 $radarScan[] = [
                     'order' => $fallbackOrder,
                     'loaded_weight' => $loadedWeight,
-                    'available_weight' => (int)$fallbackOrder['weight_remaining'],
+                    'available_weight' => (int)$fallbackOrder['weight_total'], // KORREKTUR: Zeigt die original Gesamttonnage (57 t) statt der Restmenge!
                     'is_split' => $isSplit,
                     'empty_run_dist' => $distanceToOrder,
                     'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
@@ -444,10 +744,14 @@ class TopologyEngine
                     'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market',
                     'radar_indicator' => $this->simulateRadarChain((int)$fallbackOrder['to_city_id'], $truckId, $vehicleType, $capacity)
                 ];
+
+                if (count($radarScan) >= 3) {
+                    break;
+                }
             }
         }
 
-        // 5. Priorisierte Sortierung: 1. Leerfahrt-Entfernung (ASC), 2. Erlös pro tkm (DESC) (KORREKTUR: Nutzt harmonisierten Key)
+        // 5. Priorisierte Sortierung: 1. Leerfahrt-Entfernung (ASC), 2. Erlös pro tkm (DESC)
         usort($radarScan, function($a, $b) {
             if ($a['empty_run_dist'] !== $b['empty_run_dist']) {
                 return $a['empty_run_dist'] <=> $b['empty_run_dist'];
@@ -460,12 +764,6 @@ class TopologyEngine
 
     /**
      * Simuliert vorausschauend die Ketten-Tiefe für eine Option (max 5 Schritte) nach PH § 7.3.
-     *
-     * @param int $startCityId Zielort des aktuellen Vorschlags (Startpunkt der Simulation)
-     * @param int $truckId Die Fahrzeug-ID
-     * @param string $vehicleType Der Fahrzeugtyp
-     * @param int $capacity Die Kapazität des LKW
-     * @return array Array mit 'type' (1=Grün, 2=Orange, 3=Rot) und 'label' (Anzeigetext)
      */
     private function simulateRadarChain(int $startCityId, int $truckId, string $vehicleType, int $capacity): array
     {
@@ -485,6 +783,7 @@ class TopologyEngine
                 WHERE from_city_id = ? 
                   AND is_archived = 0 
                   AND assigned_truck_id IS NULL
+                  AND weight_remaining > 0
                   AND weight_total <= ?
                   AND (is_adr = 0 OR ? = 1)
             ");
@@ -517,6 +816,7 @@ class TopologyEngine
                     WHERE from_city_id IN ($placeholders) 
                       AND is_archived = 0 
                       AND assigned_truck_id IS NULL
+                      AND weight_remaining > 0
                       AND weight_total <= ?
                       AND (is_adr = 0 OR ? = 1)
                 ");

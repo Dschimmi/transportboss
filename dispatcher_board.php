@@ -663,8 +663,20 @@ if ($focusTruck) {
                                 </thead>
                                 <tbody>
                                     <?php foreach ($focusSuggestions as $suggestion): ?>
-                                    <?php $order = $suggestion['order']; ?>
-                                    <tr class="<?php echo $suggestion['is_split'] ? 'row-split-load' : ''; ?>">
+                                    <?php 
+                                    $order = $suggestion['order']; 
+                                    
+                                    // Dynamische CSS-Klassen für den Zeilenstatus generieren
+                                    $rowClasses = [];
+                                    if ($suggestion['is_split']) {
+                                        $rowClasses[] = 'row-split-load';
+                                    }
+                                    if (!empty($suggestion['violates_weight_lock'])) {
+                                        $rowClasses[] = 'row-type-empty'; // Rötliche Einfärbung zur Visualisierung der Warnung
+                                    }
+                                    $rowClassStr = implode(' ', $rowClasses);
+                                    ?>
+                                    <tr class="<?php echo $rowClassStr; ?>">
                                         <td>
                                             <!-- Laden-Button ganz links -->
                                             <form method="post" action="load_job.php">
@@ -679,8 +691,11 @@ if ($focusTruck) {
                                             ➔ <?php echo htmlspecialchars($order['to_city_name']); ?>
                                         </td>
                                         <td><?php echo htmlspecialchars($order['freight_type']); ?></td>
-                                        <td>
+                                        <td class="<?php echo !empty($suggestion['violates_weight_lock']) ? 'text-warning-bold' : ''; ?>">
                                             <?php echo $suggestion['loaded_weight']; ?> t / <?php echo $suggestion['available_weight']; ?> t
+                                            <?php if (!empty($suggestion['violates_weight_lock'])): ?>
+                                                <br><small class="text-warning-bold">[Tonnage-Sperre]</small>
+                                            <?php endif; ?>
                                         </td>
                                         <td><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</td>
                                         <td>

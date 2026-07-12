@@ -447,7 +447,7 @@ $marketVehicles = $pdo->query("
                     <tr>
                         <th onclick="sortTable('activeFleetTable', 0, 'string')">LKW-ID ⇕</th>
                         <th onclick="sortTable('activeFleetTable', 1, 'string')">Fahrzeugtyp ⇕</th>
-                        <th onclick="sortTable('activeFleetTable', 2, 'number')">Kapazität ⇕</th>
+                        <th onclick="sortTable('activeFleetTable', 2, 'number')">Kapazität (Sperren) ⇕</th>
                         <th onclick="sortTable('activeFleetTable', 3, 'number')">Baujahr ⇕</th>
                         <th onclick="sortTable('activeFleetTable', 4, 'number')">Laufleistung ⇕</th>
                         <th onclick="sortTable('activeFleetTable', 5, 'number')">Zustand ⇕</th>
@@ -467,7 +467,16 @@ $marketVehicles = $pdo->query("
                                 <strong>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?></strong>
                             </td>
                             <td><?= htmlspecialchars($truck['vehicle_type']) ?></td>
-                            <td><?= $truck['capacity_t'] ?> t</td>
+                            <td>
+                                <?= $truck['capacity_t'] ?> t
+                                <?php if ((int)$truck['min_weight_t'] > 0 || (int)$truck['max_weight_t'] > 0): ?>
+                                    <br>
+                                    <small class="text-orange" title="Aktive Tonnage-Sperren">
+                                        Min: <?= (int)$truck['min_weight_t'] ?>t / 
+                                        Max: <?= (int)$truck['max_weight_t'] > 0 ? (int)$truck['max_weight_t'] . 't' : 'unbegr.' ?>
+                                    </small>
+                                <?php endif; ?>
+                            </td>
                             <td><?= $truck['year_built'] ?></td>
                             <td><?= number_format((float)$truck['km_stand'], 0, ',', '.') ?> km</td>
                             <td><strong><?= number_format((float)$truck['condition_pct'], 1, ',', '.') ?> %</strong></td>

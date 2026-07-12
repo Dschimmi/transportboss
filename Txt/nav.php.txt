@@ -9,7 +9,7 @@ declare(strict_types=1);
  * konsistente Verknüpfungen zu den jeweiligen Übersichtsseiten her.
  *
  * @author TransportBoss Development
- * @version 1.1.0
+ * @version 1.2.0
  */
 ?>
 <!-- Globale Navigations-Komponente (Zentrales Stylesheet: main.css) -->
@@ -22,11 +22,11 @@ declare(strict_types=1);
         <!-- Haupt-Dashboard mit KPIs -->
         <a href="index.php">Dashboard</a>
         
-        <!-- Fuhrpark & Personal (LKWs und Fahrerzuweisung) -->
-        <a href="fleet_manager.php">Fuhrpark & Personal</a>
+        <!-- Fuhrpark (LKWs, Neukauf, Gebrauchtwagen-Übernahme, Updates) -->
+        <a href="fleet_manager.php">Fuhrpark</a>
         
-        <!-- Disponenten-Manager (CRUD, Slots & Bewerbungen) -->
-        <a href="dispatcher_manager.php">Disponenten</a>
+        <!-- Personal (Fahrer und Disponenten, Bewerbungen, Angestellte) -->
+        <a href="personnel_manager.php">Personal</a>
         
         <!-- Disposition (Das interaktive Board zur Tourenplanung) -->
         <a href="dispatcher_board.php">Disposition</a>
@@ -34,10 +34,13 @@ declare(strict_types=1);
         <!-- Eigene angenommene Lageraufträge (warehouse_view.php) -->
         <a href="warehouse_view.php">Lager</a>
         
-        <!-- Frachtbörse (Übersicht der lukrativsten Pool-Angebote; korrigiert von market_pool.php) -->
+        <!-- Frachtbörse (Übersicht der lukrativsten Pool-Angebote) -->
         <a href="orders_view.php">Frachtbörse</a>
         
         <!-- Gebrauchtwagenmarkt (Fahrzeughandel-Import) -->
         <a href="market_vehicles.php">Fahrzeugmarkt</a>
+
+        <!-- Die globale Spieler-Rangliste und Konkurrenzüberwachung -->
+        <a href="ranking_manager.php">Rangliste</a>
     </div>
 </nav>

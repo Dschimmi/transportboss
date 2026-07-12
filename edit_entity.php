@@ -19,8 +19,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($type === 'truck') {
             if (!in_array($_POST['vehicle_type'], $allowedTruckTypes)) throw new Exception("Ungültiger Fahrzeugtyp!");
-            $stmt = $pdo->prepare("UPDATE trucks SET user_label = :label, vehicle_type = :type, capacity_t = :cap, year_built = :year, km_stand = :km, current_city_id = :city WHERE id = :id");
-            $stmt->execute(['label' => $_POST['user_label'], 'type' => $_POST['vehicle_type'], 'cap' => (int)$_POST['capacity_t'], 'year' => (int)$_POST['year_built'], 'km' => (int)$_POST['km_stand'], 'city' => (int)$_POST['current_city_id'], 'id' => $id]);
+            $stmt = $pdo->prepare("
+                UPDATE trucks 
+                SET user_label = :label, 
+                    vehicle_type = :type, 
+                    capacity_t = :cap, 
+                    year_built = :year, 
+                    km_stand = :km, 
+                    min_weight_t = :min_weight,
+                    max_weight_t = :max_weight,
+                    current_city_id = :city 
+                WHERE id = :id
+            ");
+            $stmt->execute([
+                'label' => $_POST['user_label'], 
+                'type' => $_POST['vehicle_type'], 
+                'cap' => (int)$_POST['capacity_t'], 
+                'year' => (int)$_POST['year_built'], 
+                'km' => (int)$_POST['km_stand'], 
+                'min_weight' => (int)$_POST['min_weight_t'],
+                'max_weight' => (int)$_POST['max_weight_t'],
+                'city' => (int)$_POST['current_city_id'], 
+                'id' => $id
+            ]);
         } else {
             $stmt = $pdo->prepare("UPDATE drivers SET first_name = :fn, last_name = :ln, age = :age, skill_val = :skill, reliability_val = :rel, adr_permit = :adr, salary = :sal WHERE id = :id");
             $stmt->execute(['fn' => $_POST['first_name'], 'ln' => $_POST['last_name'], 'age' => (int)$_POST['age'], 'skill' => (int)$_POST['skill_val'], 'rel' => (int)$_POST['reliability_val'], 'adr' => isset($_POST['adr_permit']) ? 1 : 0, 'sal' => (float)$_POST['salary'], 'id' => $id]);
@@ -65,6 +86,8 @@ $cities = $pdo->query("SELECT id, name FROM cities ORDER BY name ASC")->fetchAll
                     <div class="input-group"><label>Stadt:</label><select name="current_city_id">
                         <?php foreach($cities as $c): ?><option value="<?= $c['id'] ?>" <?= $c['id']==$item['current_city_id']?'selected':'' ?>><?= $c['name'] ?></option><?php endforeach; ?>
                     </select></div>
+                    <div class="input-group"><label>Tonnage-Sperre MIN (t) [0 = Deaktiviert]:</label><input type="number" name="min_weight_t" value="<?= (int)($item['min_weight_t'] ?? 0) ?>"></div>
+            <div class="input-group"><label>Tonnage-Sperre MAX (t) [0 = Unbegrenzt]:</label><input type="number" name="max_weight_t" value="<?= (int)($item['max_weight_t'] ?? 0) ?>"></div>
                 <?php else: ?>
                     <div class="input-group"><label>Vorname:</label><input type="text" name="first_name" value="<?= htmlspecialchars($item['first_name']) ?>"></div>
                     <div class="input-group"><label>Nachname:</label><input type="text" name="last_name" value="<?= htmlspecialchars($item['last_name']) ?>"></div>
