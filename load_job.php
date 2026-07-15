@@ -95,13 +95,25 @@ class JobLoader
 
                 // 3. Neuen Klon-Auftrag für die transportierte Teilladung anlegen und dem LKW zuweisen
                 // Erzeuge eine eindeutige IDN für das Teilstück, um Unique-Sperren zu umgehen (z.B. IDN10645786-1)
+                // KORREKTUR: Max-Suffix-Inkrementor statt COUNT(*) verhindert Kollisionen bei gelöschten Zwischengliedern
                 $splitIdn = null;
                 if ($order['ingame_order_id']) {
-                    $stmtCount = $this->pdo->prepare("SELECT COUNT(*) FROM orders WHERE ingame_order_id LIKE ?");
-                    $stmtCount->execute([$order['ingame_order_id'] . '%']);
-                    $splitCount = (int)$stmtCount->fetchColumn();
-                    // Der Klon erhält das Suffix "-1", "-2" etc.
-                    $splitIdn = $order['ingame_order_id'] . '-' . $splitCount;
+                    $stmtSuffixes = $this->pdo->prepare("SELECT ingame_order_id FROM orders WHERE ingame_order_id LIKE ?");
+                    $stmtSuffixes->execute([$order['ingame_order_id'] . '-%']);
+                    $existingSuffixes = $stmtSuffixes->fetchAll(PDO::FETCH_COLUMN);
+
+                    $maxSuffix = 0;
+                    foreach ($existingSuffixes as $existingIdn) {
+                        $parts = explode('-', $existingIdn);
+                        if (isset($parts[1])) {
+                            $suffixNum = (int)$parts[1];
+                            if ($suffixNum > $maxSuffix) {
+                                $maxSuffix = $suffixNum;
+                            }
+                        }
+                    }
+                    $nextSuffix = $maxSuffix + 1;
+                    $splitIdn = $order['ingame_order_id'] . '-' . $nextSuffix;
                 }
 
                 $stmtInsertSplit = $this->pdo->prepare("
@@ -160,9 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
         $loader = new JobLoader($pdo);
         $loader->execute($truckId, $orderId);
     } catch (Exception $e) {
-        // Fehler temporär ignorieren und zur Disposition zurückleiten
+        // KORREKTUR: Zeigt den genauen Fehlergrund an, anstatt ihn stillschweigend zu ignorieren
+        die("Fataler Fehler beim Zuweisen des Auftrags: " . $e->getMessage());
     }
-
     // Zurück zur Disposition mit dem ausgewählten LKW im Fokus
     header("Location: dispatcher_board.php?focus_truck_id=" . $truckId);
     exit;

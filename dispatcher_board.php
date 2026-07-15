@@ -425,6 +425,9 @@ if ($focusTruck) {
             <div class="board-middle">
                 <h2 class="accent-text sidebar-title">Fuhrpark</h2>
                 
+                <!-- Schnellsuche-Eingabefeld (Fahrer, Typ, ID, Tonnen) -->
+                <input type="text" id="truckSearch" class="filter-input city-filter-input" placeholder="LKW, Fahrer, Typ, ID oder Tonnen filtern..." onkeyup="applyTruckFilter()">
+                
                 <?php foreach ($allTrucks as $truck): ?>
                 <?php 
                 $truckSuggestions = $suggestedChains[$truck['id']] ?? [];
@@ -437,12 +440,12 @@ if ($focusTruck) {
                 $isFocussed = ($truck['id'] == $focusTruckId);
                 $driver = $driverMap[$truck['assigned_driver_id']] ?? null;
                 ?>
-                <!-- Zweizeiliger kompakter LKW-Button (Dynamische Zustände via Klassen abgebildet) -->
+                <!-- Zweizeiliger kompakter LKW-Button (Inhalte getauscht nach PH-Soll) -->
                 <div id="truck-<?php echo $truck['id']; ?>"
                      class="truck-btn <?php echo $truck['is_active_planning'] ? 'truck-btn-active' : 'truck-btn-inactive'; ?> <?php echo $isFocussed ? 'truck-btn-focussed' : ''; ?>" 
                      onclick="selectTruck(<?php echo $truck['id']; ?>)">
                     
-                    <!-- Reihe 1: Aktiv-Checkbox, Typ & Kapazität, geplante Jobs -->
+                    <!-- Reihe 1 (Oben, größer): Aktiv-Checkbox, Fahrername & ADR-Badge, geplante Jobs-Anzahl -->
                     <div class="btn-row-1">
                         <div class="truck-btn-header-left">
                             <form method="post" class="checkbox-planning-form" onclick="event.stopPropagation();">
@@ -451,14 +454,6 @@ if ($focusTruck) {
                                 <input type="hidden" name="state" value="<?= $truck['is_active_planning'] ? 0 : 1 ?>">
                                 <input type="checkbox" <?= $truck['is_active_planning'] ? 'checked' : '' ?> onchange="this.form.submit()" class="checkbox-planning">
                             </form>
-                            <span><?= htmlspecialchars($truck['vehicle_type']) ?> (<?= $truck['capacity_t'] ?>t)</span>
-                        </div>
-                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
-                    </div>
-
-                    <!-- Reihe 2: Fahrername, ADR & virtuelles Tourende -->
-                    <div class="btn-row-2">
-                        <div>
                             <?php if ($driver): ?>
                                 <span><?= htmlspecialchars($driver['last_name'] . ', ' . substr($driver['first_name'], 0, 1) . '.') ?></span>
                                 <?= $driver['adr_permit'] ? '<span class="adr-badge">[ADR]</span>' : '' ?>
@@ -466,17 +461,23 @@ if ($focusTruck) {
                                 <span class="driver-unassigned">Unbesetzt</span>
                             <?php endif; ?>
                         </div>
+                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                    </div>
+
+                    <!-- Reihe 2 (Unten, kleiner): LKW ID, Typ & Kapazität, virtuelles Tourende / POS -->
+                    <div class="btn-row-2">
+                        <div>
+                            <span>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?> - <?= htmlspecialchars($truck['vehicle_type']) ?> (<?= $truck['capacity_t'] ?>t)</span>
+                        </div>
                         <div>
                             <?php
                             $lastOrder = $orderRepo->getLastOrderForTruck((int)$truck['id']);
                             if ($lastOrder) {
                                 $tourEndCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$lastOrder['to_city_id'])->fetchColumn();
-                                // Wenn isAlert wahr ist, färben wir den Zielort in Warnrot
                                 $cityClass = $isAlert ? 'text-tour-end-alert' : 'text-tour-end';
                                 echo '<span class="' . $cityClass . '">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
                             } else {
                                 $currentCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$truck['current_city_id'])->fetchColumn();
-                                // Wenn isAlert wahr ist, färben wir den POS-Ort in Warnrot
                                 $cityClass = $isAlert ? 'text-pos-alert' : 'text-pos';
                                 echo '<span class="' . $cityClass . '">➔ POS: ' . htmlspecialchars($currentCity) . '</span>';
                             }
@@ -528,14 +529,14 @@ if ($focusTruck) {
                                         $orderFromId = (int)$order['from_city_id'];
                                         $orderToId = (int)$order['to_city_id'];
 
-                                        // Leerfahrten-Berechnung
+                                        // Leerfahrten-Berechnung (Kopierbare Städte)
                                         if ($orderFromId !== $currentCityId) {
                                             $emptyDistance = $distanceService->getDistance($currentCityId, $orderFromId);
                                             $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn();
                                             echo '<tr class="row-type-empty">
                                                 <td></td>
                                                 <td class="text-warning-bold">LEERFAHRT</td>
-                                                <td>' . htmlspecialchars($fromCityName) . ' ➔ ' . htmlspecialchars($order['from_city_name']) . '</td>
+                                                <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($fromCityName) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span></td>
                                                 <td>' . $emptyDistance . ' km</td>
                                                 <td>-</td>
                                                 <td>0,00 €</td>
@@ -608,7 +609,7 @@ if ($focusTruck) {
                                                 </form>
                                             </td>
                                             <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
-                                            <td>' . htmlspecialchars($order['from_city_name']) . ' ➔ ' . htmlspecialchars($order['to_city_name']) . '</td>
+                                            <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span></td>
                                             <td>' . $jobDistance . ' km</td>
                                             <td>' . $order['weight_remaining'] . ' t / ' . $availableAtLoading . ' t</td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
@@ -687,8 +688,8 @@ if ($focusTruck) {
                                         </td>
                                         <td><?php echo htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool'); ?></td>
                                         <td>
-                                            <?php echo htmlspecialchars($order['from_city_name']); ?>
-                                            ➔ <?php echo htmlspecialchars($order['to_city_name']); ?>
+                                            <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['from_city_name']); ?></span>
+                                            ➔ <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['to_city_name']); ?></span>
                                         </td>
                                         <td><?php echo htmlspecialchars($order['freight_type']); ?></td>
                                         <td class="<?php echo !empty($suggestion['violates_weight_lock']) ? 'text-warning-bold' : ''; ?>">
@@ -775,6 +776,54 @@ if ($focusTruck) {
                 }
                 row.style.display = match ? '' : 'none';
             });
+        });
+        // --- Live LKW-Filtersteuerung für die Fuhrpark-Spalte ---
+        function applyTruckFilter() {
+            const query = document.getElementById('truckSearch').value.toLowerCase();
+            const keywords = query.split(/\s+/).filter(k => k.trim() !== '');
+            const buttons = document.querySelectorAll('.truck-btn');
+
+            buttons.forEach(btn => {
+                const text = btn.textContent.toLowerCase();
+                let match = true;
+                
+                // Prüfe, ob alle eingegebenen Suchbegriffe auf der LKW-Karte vorkommen (UND-Verknüpfung)
+                for (let kw of keywords) {
+                    if (!text.includes(kw)) {
+                        match = false;
+                        break;
+                    }
+                }
+                
+                // Setzt die CSS-Anzeige-Eigenschaft zurück oder schaltet sie ab (Sicherheits-Integrität)
+                if (match) {
+                    btn.style.setProperty('display', 'flex', 'important');
+                } else {
+                    btn.style.setProperty('display', 'none', 'important');
+                }
+            });
+        }
+        // --- Live-Kopieren von Städtenamen direkt über die Container-Klassen (PH § 1.4.5) ---
+        ['.detail-top-half', '.detail-bottom-half'].forEach(selector => {
+            const container = document.querySelector(selector);
+            if (container) {
+                container.addEventListener('click', function(e) {
+                    if (e.target && e.target.classList.contains('copy-city')) {
+                        const cityName = e.target.textContent.trim();
+                        
+                        // Native Zwischenablage-API nutzen
+                        navigator.clipboard.writeText(cityName).then(() => {
+                            // Visuelles Erfolgs-Feedback (Flasht kurz orange)
+                            e.target.classList.add('text-orange');
+                            setTimeout(() => {
+                                e.target.classList.remove('text-orange');
+                            }, 500);
+                        }).catch(err => {
+                            // Geräuschloser Fallback
+                        });
+                    }
+                });
+            }
         });
     </script>
 </body>
