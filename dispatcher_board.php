@@ -501,7 +501,9 @@ if ($focusTruck) {
                             <thead>
                                 <tr>
                                     <th>Erledigt?</th>
+                                    <th>Status</th>
                                     <th>Typ</th>
+                                    <th>Art</th>
                                     <th>Route</th>
                                     <th>Distanz</th>
                                     <th>Tonnage</th>
@@ -529,13 +531,15 @@ if ($focusTruck) {
                                         $orderFromId = (int)$order['from_city_id'];
                                         $orderToId = (int)$order['to_city_id'];
 
-                                        // Leerfahrten-Berechnung (Kopierbare Städte)
+                                        // Leerfahrten-Berechnung (Kopierbare Städte, angepasst an 9-Spalten-Layout)
                                         if ($orderFromId !== $currentCityId) {
                                             $emptyDistance = $distanceService->getDistance($currentCityId, $orderFromId);
                                             $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn();
                                             echo '<tr class="row-type-empty">
                                                 <td></td>
                                                 <td class="text-warning-bold">LEERFAHRT</td>
+                                                <td>-</td>
+                                                <td>-</td>
                                                 <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($fromCityName) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span></td>
                                                 <td>' . $emptyDistance . ' km</td>
                                                 <td>-</td>
@@ -545,9 +549,11 @@ if ($focusTruck) {
                                             $currentCityId = $orderFromId;
                                         }
 
-                                        // Cargo-Berechnung "on the fly" mit echtem LAGER/BÖRSE Status
+                                        // Cargo-Berechnung "on the fly" mit echtem LAGER/BÖRSE Status (IDN-Ersetzung & Kopier-Span)
                                         $jobDistance = $distanceService->getDistance($orderFromId, $orderToId);
-                                        $jobTypeLabel = ((int)$order['is_accepted'] === 1) ? 'LAGER' : 'BÖRSE';
+                                        $jobTypeLabel = ((int)$order['is_accepted'] === 1) 
+                                            ? '<span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['ingame_order_id'] ?? 'LAGER') . '</span>' 
+                                            : 'BÖRSE';
                                         $jobTypeColor = ((int)$order['is_accepted'] === 1) ? 'text-lager' : 'text-market';
 
                                         // -------------------------------------------------------------
@@ -609,6 +615,8 @@ if ($focusTruck) {
                                                 </form>
                                             </td>
                                             <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
+                                            <td>' . htmlspecialchars($order['freight_type']) . '</td>
+                                            <td>' . htmlspecialchars($order['commodity']) . '</td>
                                             <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span></td>
                                             <td>' . $jobDistance . ' km</td>
                                             <td>' . $order['weight_remaining'] . ' t / ' . $availableAtLoading . ' t</td>
@@ -646,22 +654,19 @@ if ($focusTruck) {
                         if (!empty($focusSuggestions)): 
                         ?>
                             <table class="suggestion-table workspace-table">
-                                <thead>
-                                    <tr>
-                                        <th>Laden?</th> <!-- GANZ LINKS -->
-                                        <th>Auftrags-ID</th>
-                                        <th>Route</th>
-                                        <th>Typ</th>
-                                        <th>Gewicht (Ladung)</th>
-                                        <th>Erlös</th>
-                                        <th>Leerfahrt</th>
-                                        <?php if ($planningMode === 'radar'): ?>
-                                            <th>Ketten-Radar</th>
-                                        <?php endif; ?>
-                                        <th>Status</th>
-                                        <th>Aktion</th> <!-- ARCHIVIEREN GANZ RECHTS -->
-                                    </tr>
-                                </thead>
+                            <thead>
+                                <tr>
+                                    <th>Erledigt?</th>
+                                    <th>Status</th>
+                                    <th>Typ</th>
+                                    <th>Art</th>
+                                    <th>Route</th>
+                                    <th>Distanz</th>
+                                    <th>Tonnage</th>
+                                    <th>Erlös</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
                                 <tbody>
                                     <?php foreach ($focusSuggestions as $suggestion): ?>
                                     <?php 
@@ -686,7 +691,13 @@ if ($focusTruck) {
                                                 <button type="submit" class="btn-primary btn-load">Laden</button>
                                             </form>
                                         </td>
-                                        <td><?php echo htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool'); ?></td>
+                                        <td>
+                                            <?php if (!empty($order['ingame_order_id'])): ?>
+                                                <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['ingame_order_id']); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-muted-italic">Marktpool</span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td>
                                             <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['from_city_name']); ?></span>
                                             ➔ <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['to_city_name']); ?></span>
@@ -803,16 +814,21 @@ if ($focusTruck) {
                 }
             });
         }
-        // --- Live-Kopieren von Städtenamen direkt über die Container-Klassen (PH § 1.4.5) ---
+        // --- Live-Kopieren von Städtenamen und bereinigten IDN-Nummern (PH § 1.4.5) ---
         ['.detail-top-half', '.detail-bottom-half'].forEach(selector => {
             const container = document.querySelector(selector);
             if (container) {
                 container.addEventListener('click', function(e) {
                     if (e.target && e.target.classList.contains('copy-city')) {
-                        const cityName = e.target.textContent.trim();
+                        let textToCopy = e.target.textContent.trim();
+                        
+                        // KORREKTUR: Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
+                        if (textToCopy.startsWith('IDN') && textToCopy.includes('-')) {
+                            textToCopy = textToCopy.split('-')[0];
+                        }
                         
                         // Native Zwischenablage-API nutzen
-                        navigator.clipboard.writeText(cityName).then(() => {
+                        navigator.clipboard.writeText(textToCopy).then(() => {
                             // Visuelles Erfolgs-Feedback (Flasht kurz orange)
                             e.target.classList.add('text-orange');
                             setTimeout(() => {
