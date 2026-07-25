@@ -250,51 +250,6 @@ $cities = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // --- HELFER-FUNKTIONEN FÜR DEN ALGORITHMUS ---
-
-function isFreightCompatible(string $vehicleType, string $freightType): bool {
-    // Hilfsfunktion zur internen Normalisierung von Ingame-Frachtbezeichnungen
-    $normalize = function(string $type): string {
-        $lower = strtolower($type);
-        if (str_contains($lower, 'silo')) return 'Silo';
-        if (str_contains($lower, 'flüssig') || str_contains($lower, 'tank')) return 'Tankwagen';
-        if (str_contains($lower, 'kühl')) return 'Kühlwagen';
-        if (str_contains($lower, 'schütt')) return 'Schüttgut';
-        if (str_contains($lower, 'kurier')) return 'Kurier';
-        if (str_contains($lower, 'pritsche')) return 'Pritsche';
-        if (str_contains($lower, 'iso')) return 'ISO-Container';
-        if (str_contains($lower, 'schwer')) return 'Schwertransport';
-        if (str_contains($lower, 'koffer')) return 'Koffer';
-        if (str_contains($lower, 'plane')) return 'Plane';
-        if (str_contains($lower, 'stück')) return 'Stückgut';
-        return $type;
-    };
-
-    $vType = $normalize($vehicleType);
-    $fType = $normalize($freightType);
-
-    if ($vType === $fType) {
-        return true;
-    }
-
-    // Ihre vollständige fahrzeugübergreifende Kompatibilitätsmatrix (PH 3.3)
-    $matrix = [
-        'Kurier' => ['Kurier', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
-        'Stückgut' => ['Stückgut', 'Kurier', 'Pritsche', 'Plane', 'Koffer'],
-        'Schüttgut' => ['Schüttgut'],
-        'Pritsche' => ['Pritsche', 'Schüttgut'],
-        'Plane' => ['Plane', 'Stückgut', 'Pritsche'],
-        'Koffer' => ['Koffer', 'Stückgut', 'Pritsche', 'Plane'],
-        'Kühlwagen' => ['Kühlwagen', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
-        'Silo' => ['Silo'],
-        'Tankwagen' => ['Tankwagen'],
-        'Schwertransport' => ['Schwertransport'],
-        'ISO-Container' => ['ISO-Container'],
-        'Super-Liner' => ['Super-Liner', 'Stückgut', 'Pritsche', 'Plane', 'Koffer']
-    ];
-
-    return in_array($fType, $matrix[$vType] ?? [], true);
-}
-
 function get3CityNeighborhood(PDO $pdo, int $cityId): array {
     $stmtNear = $pdo->prepare("
         SELECT city_b_id AS city_id, distance_km FROM distances WHERE city_a_id = :cityId
@@ -352,7 +307,8 @@ foreach ($activeTrucks as $at) {
     $driverHasAdr = isset($driverMap[$at['assigned_driver_id']]) ? (bool)$driverMap[$at['assigned_driver_id']]['adr_permit'] : false;
     
     foreach ($unassignedOrdersForAlert as $o) {
-        if (isFreightCompatible($at['vehicle_type'], $o['freight_type'])) {
+        // KORREKTUR: Nutzt die unifizierte, statische Klassen-Methode (DRY-Soll)
+        if (TopologyEngine::isTypeCompatible($o['freight_type'], $at['vehicle_type'])) {
             if ($o['is_adr'] === 0 || $driverHasAdr) {
                 $hasAnyCompatible = true;
                 break;

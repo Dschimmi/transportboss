@@ -56,8 +56,8 @@ class TopologyEngine
                 continue;
             }
 
-            // A. Physische Kompatibilität des anderen LKWs prüfen
-            if (!$this->isTypeCompatible($order['freight_type'], $otherTruck['vehicle_type'])) {
+            // A. Physische Kompatibilität des anderen LKWs prüfen (KORREKTUR: Statischer self:: Aufruf)
+            if (!self::isTypeCompatible($order['freight_type'], $otherTruck['vehicle_type'])) {
                 continue;
             }
 
@@ -219,7 +219,7 @@ class TopologyEngine
 
                 foreach ($virtualOrderPool as $index => $op) {
                     if ($op['weight_remaining'] <= 0) continue;
-                    if (!$this->isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
+                    if (!self::isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
                     if ($op['is_adr'] === 1 && $driverAdr === 0) continue;
                     if (!in_array($op['from_city_id'], $neighborhood, true)) continue;
                     if ($op['is_accepted'] === 0 && $marketOrdersCount >= $freeMarketSlots) continue;
@@ -229,9 +229,14 @@ class TopologyEngine
 
                     // Nutzt das instanziierte distanceService-Objekt der Klasse
                     $emptyRunDist = $this->distanceService->getDistance($currentEndpoint, $op['from_city_id']);
-                    $profitability = $op['revenue'] / $op['weight_total'];
+                    
+                    // KORREKTUR: Berechnet die exakte proportionale Kilometer-Marge des LKW für diese Fahrt
+                    $loadedWeight = min((int)$op['weight_remaining'], (int)$t['capacity_t']);
+                    $proportionalRevenue = ($op['revenue'] / $op['weight_total']) * $loadedWeight;
+                    $routeDistance = $this->distanceService->getDistance((int)$op['from_city_id'], (int)$op['to_city_id']);
+                    $profitability = $proportionalRevenue / max(1, $routeDistance);
 
-                    if ($bestCandidate === null 
+                    if ($bestCandidate === null
                         || $emptyRunDist < $bestCandidate['empty_run_dist'] 
                         || ($emptyRunDist === $bestCandidate['empty_run_dist'] && $profitability > $bestCandidate['profitability'])) {
                         
@@ -320,8 +325,8 @@ class TopologyEngine
 
         $suggestions = [];
         foreach ($orders as $order) {
-            // Fahrzeugtyp prüfen
-            if (!$this->isTypeCompatible($order['freight_type'], $truck['vehicle_type'])) {
+            // Fahrzeugtyp prüfen (KORREKTUR: Statischer self:: Aufruf)
+            if (!self::isTypeCompatible($order['freight_type'], $truck['vehicle_type'])) {
                 continue;
             }
 
@@ -347,10 +352,16 @@ class TopologyEngine
 
             $distanceToOrder = $this->distanceService->getDistance($currentCityId, $order['from_city_id']);
             $routeDistance = $this->distanceService->getDistance($order['from_city_id'], $order['to_city_id']);
+            
+            // KORREKTUR: Berechnet die proportionale Kilometer-Marge des LKW für diese Fahrt
+            $loadedWeight = min((int)$order['weight_remaining'], (int)$truck['capacity_t']);
+            $proportionalRevenue = ($order['revenue'] / $order['weight_total']) * $loadedWeight;
+            $tripYield = $proportionalRevenue / max(1, $routeDistance);
+
             $suggestions[] = [
                 'order' => $order,
                 'distance_to_order' => $distanceToOrder,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($routeDistance, 1)),
+                'earning_per_tkm' => $tripYield,
                 'is_fallback' => false,
                 'status' => $order['is_accepted'] ? 'warehouse' : 'market'
             ];
@@ -367,10 +378,16 @@ class TopologyEngine
 
                 $distanceToOrder = $this->distanceService->getDistance($currentCityId, $fallbackOrder['from_city_id']);
                 $routeDistance = $this->distanceService->getDistance($fallbackOrder['from_city_id'], $fallbackOrder['to_city_id']);
+                
+                // KORREKTUR: Berechnet die proportionale Kilometer-Marge des LKW für diese Fallback-Fahrt
+                $loadedWeight = min((int)$fallbackOrder['weight_remaining'], (int)$truck['capacity_t']);
+                $proportionalRevenue = ($fallbackOrder['revenue'] / $fallbackOrder['weight_total']) * $loadedWeight;
+                $tripYield = $proportionalRevenue / max(1, $routeDistance);
+
                 $suggestions[] = [
                     'order' => $fallbackOrder,
                     'distance_to_order' => $distanceToOrder,
-                    'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
+                    'earning_per_tkm' => $tripYield,
                     'is_fallback' => true,
                     'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market'
                 ];
@@ -410,8 +427,10 @@ class TopologyEngine
 
     /**
      * Prüft, ob ein Frachttyp mit einem Fahrzeugtyp kompatibel ist (PH 3.3 Matrix-Abgleich).
+     *
+     * KORREKTUR: Statische Deklaration für die systemweite, redundanzfreie Nutzung (DRY-Soll).
      */
-    public function isTypeCompatible(string $freightType, string $vehicleType): bool
+    public static function isTypeCompatible(string $freightType, string $vehicleType): bool
     {
         $normalize = function(string $type): string {
             $lower = strtolower($type);
@@ -686,8 +705,8 @@ class TopologyEngine
         $driverHasAdr = $this->hasAdrDriverForTruck($truckId);
 
         foreach ($orders as $order) {
-            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden
-            if (!$this->isTypeCompatible($order['freight_type'], $vehicleType)) continue;
+            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden (KORREKTUR: Statischer self:: Aufruf)
+            if (!self::isTypeCompatible($order['freight_type'], $vehicleType)) continue;
 
             if ($order['is_adr'] && !$driverHasAdr) continue;
 
@@ -701,13 +720,18 @@ class TopologyEngine
             // Simuliere die vorausschauende Kette (Radar-Stufe)
             $radarIndicator = $this->simulateRadarChain((int)$order['to_city_id'], $truckId, $vehicleType, $capacity);
 
+            // KORREKTUR: Berechnet die reale proportionale Kilometer-Marge des LKW für das Radar-Ranking
+            $proportionalRevenue = ($order['revenue'] / $order['weight_total']) * $loadedWeight;
+            $routeDistance = $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']);
+            $tripYield = $proportionalRevenue / max(1, $routeDistance);
+
             $radarScan[] = [
                 'order' => $order,
                 'loaded_weight' => $loadedWeight,
                 'available_weight' => (int)$order['weight_total'],
                 'is_split' => $isSplit,
                 'empty_run_dist' => $emptyRunDist,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max(1, $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']))),
+                'earning_per_tkm' => $tripYield, // Nutzt die LKW-spezifische Marge für das Sortierungs-Ranking
                 'status' => (int)$order['is_accepted'] === 1 ? 'warehouse' : 'market',
                 'radar_indicator' => $radarIndicator,
                 'violates_weight_lock' => $violatesWeightLock
