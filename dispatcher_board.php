@@ -438,15 +438,16 @@ if ($focusTruck) {
 
             <!-- SPALTE 2 (MITTE): Kompakte LKW-Auswahlbuttons -->
             <div class="board-middle">
-                <h2 class="accent-text sidebar-title">Fuhrpark (<?= $activePlanningCount ?> aktiv)</h2>
                 
-                <!-- Alle Fahrzeuge deaktivieren (Nur Deaktivieren-Option laut PH-Soll!) -->
-                <form method="post" style="margin-bottom: 10px;">
+                <!-- Alle Fahrzeuge deaktivieren (Am Kopf platziert, um Fehlklicks zu vermeiden) -->
+                <form method="post">
                     <input type="hidden" name="action" value="deactivate_all_trucks">
-                    <button type="submit" class="btn-primary btn-danger btn-small w-100" onclick="return confirm('Möchten Sie wirklich alle LKW für die Disposition deaktivieren?')">❌ Alle deaktivieren</button>
+                    <button type="submit" class="btn-primary btn-danger btn-small" onclick="return confirm('Möchten Sie wirklich alle LKW für die Disposition deaktivieren?')">❌ Alle deaktivieren</button>
                 </form>
 
-                <!-- Schnellsuche-Eingabefeld (Fahrer, Typ, ID, Tonnen) -->
+                <h2 class="accent-text sidebar-title">Fuhrpark (<?= $activePlanningCount ?> aktiv)</h2>
+
+                <!-- Schnellsuche-Eingabefeld (Prominent unter dem Titel platziert) -->
                 <input type="text" id="truckSearch" class="filter-input city-filter-input" placeholder="LKW, Fahrer, Typ, ID oder Tonnen filtern..." onkeyup="applyTruckFilter()">
                 
                 <?php foreach ($allTrucks as $truck): ?>
