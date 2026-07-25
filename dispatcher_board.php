@@ -60,6 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// Alle Fahrzeuge für die Disposition deaktivieren (PH-konformer Batch-Reset)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'deactivate_all_trucks') {
+    $pdo->exec("UPDATE trucks SET is_active_planning = 0");
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
 // In der Config-Tabelle persistent aktualisieren, damit alle Module das gleiche Limit nutzen
 $stmtUpdateCfg = $pdo->prepare("INSERT INTO config (cfg_key, cfg_value) VALUES ('max_dispo_slots', :val) ON DUPLICATE KEY UPDATE cfg_value = :val");
 $stmtUpdateCfg->execute(['val' => (string)$maxDispoSlots]);
@@ -213,6 +220,14 @@ $allTrucks = $pdo->query("
     GROUP BY t.id
     ORDER BY job_count ASC, t.id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+// Aktiv-Planungszähler im Speicher ermitteln (0% zusätzliche DB-Last)
+$activePlanningCount = 0;
+foreach ($allTrucks as $t) {
+    if ((int)$t['is_active_planning'] === 1) {
+        $activePlanningCount++;
+    }
+}
 
 // Alle Fahrer für schnellen Map-Lookup laden (Vermeidet N+1 Queries)
 $allDrivers = $driverRepo->getAllEmployed();
@@ -423,8 +438,14 @@ if ($focusTruck) {
 
             <!-- SPALTE 2 (MITTE): Kompakte LKW-Auswahlbuttons -->
             <div class="board-middle">
-                <h2 class="accent-text sidebar-title">Fuhrpark</h2>
+                <h2 class="accent-text sidebar-title">Fuhrpark (<?= $activePlanningCount ?> aktiv)</h2>
                 
+                <!-- Alle Fahrzeuge deaktivieren (Nur Deaktivieren-Option laut PH-Soll!) -->
+                <form method="post" style="margin-bottom: 10px;">
+                    <input type="hidden" name="action" value="deactivate_all_trucks">
+                    <button type="submit" class="btn-primary btn-danger btn-small w-100" onclick="return confirm('Möchten Sie wirklich alle LKW für die Disposition deaktivieren?')">❌ Alle deaktivieren</button>
+                </form>
+
                 <!-- Schnellsuche-Eingabefeld (Fahrer, Typ, ID, Tonnen) -->
                 <input type="text" id="truckSearch" class="filter-input city-filter-input" placeholder="LKW, Fahrer, Typ, ID oder Tonnen filtern..." onkeyup="applyTruckFilter()">
                 
@@ -492,10 +513,14 @@ if ($focusTruck) {
             <div class="board-right-workspace">
                 <?php if ($focusTruck): ?>
                     
-                    <!-- OBERE HÄLFTE: Geplante Tour -->
+                    <!-- OBERE HÄLFTE: Geplante Tour (Fahrer & Spezifikation in der Überschrift) -->
                     <div class="detail-top-half" onclick="event.stopPropagation();">
+                        <?php
+                        $focusDriver = $driverMap[$focusTruck['assigned_driver_id']] ?? null;
+                        $focusDriverName = $focusDriver ? htmlspecialchars($focusDriver['last_name'] . ', ' . substr($focusDriver['first_name'], 0, 1) . '.') : 'Unbesetzt';
+                        ?>
                         <h3 class="accent-text workspace-title">
-                            Geplante Tour für LKW ID: <?= htmlspecialchars($focusTruck['ingame_vehicle_id']) ?> (<?= htmlspecialchars($focusTruck['vehicle_type']) ?>)
+                            Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
                         </h3>
                         <table class="suggestion-table workspace-table">
                             <thead>
@@ -709,7 +734,7 @@ if ($focusTruck) {
                                                 <br><small class="text-warning-bold">[Tonnage-Sperre]</small>
                                             <?php endif; ?>
                                         </td>
-                                        <td><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</td>
+                                        <td><span class="copy-city" title="Klicken zum Kopieren"><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</span></td>
                                         <td>
                                             <?php echo $suggestion['empty_run_dist']; ?> km
                                             <?php echo $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>'; ?>
@@ -814,7 +839,7 @@ if ($focusTruck) {
                 }
             });
         }
-        // --- Live-Kopieren von Städtenamen und bereinigten IDN-Nummern (PH § 1.4.5) ---
+        // --- Live-Kopieren von Städtenamen, IDNs und konvertierten Geldbeträgen (PH § 1.4.5) ---
         ['.detail-top-half', '.detail-bottom-half'].forEach(selector => {
             const container = document.querySelector(selector);
             if (container) {
@@ -822,9 +847,17 @@ if ($focusTruck) {
                     if (e.target && e.target.classList.contains('copy-city')) {
                         let textToCopy = e.target.textContent.trim();
                         
-                        // KORREKTUR: Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
+                        // 1. Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
                         if (textToCopy.startsWith('IDN') && textToCopy.includes('-')) {
                             textToCopy = textToCopy.split('-')[0];
+                        }
+                        
+                        // 2. Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
+                        if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
+                            // Währungssymbole und Whitespaces entfernen
+                            textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
+                            // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
+                            textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
                         }
                         
                         // Native Zwischenablage-API nutzen

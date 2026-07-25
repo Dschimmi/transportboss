@@ -7,10 +7,10 @@ declare(strict_types=1);
  * Das zentrale HR- und Personal-Cockpit von TransportBoss.
  * Bietet eine universelle Datentabelle mit reaktiver Filterung nach Angestellten,
  * Bewerbern, Archiv und der kompletten HR-Historie. Ermöglicht die manuelle
- * Bearbeitung von Mitarbeiterwerten (Schulungs-Schnittstelle) sowie Fahrer-Zuweisungen.
+ * Bearbeitung sowie die Direkt-Einstellung neuer Mitarbeiter (Schulungs-Schnittstelle).
  *
  * @author TransportBoss Development
- * @version 3.0.0
+ * @version 3.1.0
  */
 
 require_once 'db_connect.php';
@@ -54,11 +54,13 @@ class PersonnelController
      */
     private function ensureDatabaseSchema(): void
     {
+        // Spalte 'last_seen_at' in drivers hinzufügen
         $colsDrivers = $this->pdo->query("DESCRIBE drivers")->fetchAll(PDO::FETCH_COLUMN);
         if (!in_array('last_seen_at', $colsDrivers, true)) {
             $this->pdo->exec("ALTER TABLE drivers ADD COLUMN last_seen_at TIMESTAMP NULL DEFAULT NULL");
         }
 
+        // Spalten 'last_seen_at' und 'role' in dispatchers hinzufügen
         $colsDispatchers = $this->pdo->query("DESCRIBE dispatchers")->fetchAll(PDO::FETCH_COLUMN);
         if (!in_array('last_seen_at', $colsDispatchers, true)) {
             $this->pdo->exec("ALTER TABLE dispatchers ADD COLUMN last_seen_at TIMESTAMP NULL DEFAULT NULL");
@@ -495,6 +497,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $_SESSION['pb_hr_message'] = "Personalwerte nach Schulung/Fortbildung erfolgreich aktualisiert.";
             $_SESSION['pb_hr_message_class'] = "status-success";
         }
+        // 7. NEU: Personal direkt manuell einstellen (Creation Form)
+        elseif ($action === 'create_personnel') {
+            $ingameId = $_POST['ingame_id'];
+            $role = $_POST['role'];
+            $first = $_POST['first_name'];
+            $last = $_POST['last_name'];
+            $age = (int)$_POST['age'];
+            $skill = isset($_POST['skill_val']) ? (int)$_POST['skill_val'] : 0;
+            $reliability = (int)$_POST['reliability_val'];
+            $salary = (float)$_POST['salary'];
+
+            if ($role === 'fahrer') {
+                $adr = isset($_POST['adr_permit']) ? 1 : 0;
+                $penalty = (int)$_POST['penalty_points'];
+                
+                $stmt = $pdo->prepare("
+                    INSERT INTO drivers (
+                        ingame_driver_id, first_name, last_name, age, skill_val, reliability_val, adr_permit, penalty_points, salary, is_employed, last_seen_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW()
+                    )
+                ");
+                $stmt->execute([$ingameId, $first, $last, $age, $skill, $reliability, $adr, $penalty, $salary]);
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO dispatchers (
+                        ingame_dispatcher_id, first_name, last_name, age, skill_val, reliability_val, salary, is_employed, role, last_seen_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW()
+                    )
+                ");
+                $stmt->execute([$ingameId, $first, $last, $age, $skill, $reliability, $salary, $role]);
+            }
+            $_SESSION['pb_hr_message'] = "Mitarbeiter erfolgreich manuell im ERP angelegt und direkt eingestellt.";
+            $_SESSION['pb_hr_message_class'] = "status-success";
+        }
 
     } catch (Exception $e) {
         $_SESSION['pb_hr_message'] = "Fehler bei der Transaktion: " . $e->getMessage();
@@ -573,7 +611,7 @@ foreach ($allPersonnel as $p) {
             <div class="feedback-msg <?= $messageClass ?>"><?= htmlspecialchars($message) ?></div>
         <?php endif; ?>
 
-        <!-- DYNAMISCHES BEARBEITUNGS- & SCHULUNGSFORMULAR (Am Kopf gerendert bei Klick auf Edit) -->
+        <!-- DYNAMISCHES BEARBEITUNGS- & SCHULUNGSFORMULAR -->
         <?php if ($editPerson): ?>
             <div class="form-box">
                 <h3 class="accent-text">Personalwerte anpassen (Schulung &amp; Gehalt): <?= htmlspecialchars($editPerson['first_name'] . ' ' . $editPerson['last_name']) ?></h3>
@@ -632,18 +670,93 @@ foreach ($allPersonnel as $p) {
                     </div>
                 </form>
             </div>
+        <?php elseif (isset($_GET['action']) && $_GET['action'] === 'add'): ?>
+            <!-- NEU: MANUELLE DIREKT-EINSTELLUNG -->
+            <div class="form-box">
+                <h3 class="accent-text">Neuen Mitarbeiter manuell anlegen &amp; einstellen</h3>
+                <form method="post" action="personnel_manager.php">
+                    <input type="hidden" name="action" value="create_personnel">
+                    
+                    <div class="dashboard-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
+                        <div class="input-group">
+                            <label>Berufsrolle</label>
+                            <select name="role" id="createRoleSelect" class="inline-select" onchange="toggleCreateRoleFields(this.value)" required style="width: 100%; height: 40px;">
+                                <option value="fahrer">🚚 Fahrer</option>
+                                <option value="disponent">🧑‍💼 Disponent</option>
+                                <option value="bürokraft">📁 Bürokraft</option>
+                                <option value="kfz-techniker">🔧 Kfz-Techniker</option>
+                                <option value="tankwart">⛽ Tankwart</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>Ingame-ID (Personalnummer)</label>
+                            <input type="text" name="ingame_id" required>
+                        </div>
+                        <div class="input-group">
+                            <label>Vorname</label>
+                            <input type="text" name="first_name" required>
+                        </div>
+                        <div class="input-group">
+                            <label>Nachname</label>
+                            <input type="text" name="last_name" required>
+                        </div>
+                        <div class="input-group">
+                            <label>Alter</label>
+                            <input type="number" name="age" required>
+                        </div>
+                        
+                        <div class="input-group" id="createSkillField">
+                            <label>Berufsspezifischer Skill</label>
+                            <input type="number" name="skill_val" value="0">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Zuverlässigkeit (0-100%)</label>
+                            <input type="number" name="reliability_val" value="100" required>
+                        </div>
+                        <div class="input-group">
+                            <label>Gehalt (€ / Monat)</label>
+                            <input type="number" name="salary" step="0.01" required>
+                        </div>
+
+                        <!-- Fahrerspezifische Zusatzfelder (werden über JS für andere Rollen ausgeblendet) -->
+                        <div id="createDriverFields" style="display: contents;">
+                            <div class="input-group">
+                                <label>Strafpunkte in Flensburg</label>
+                                <input type="number" name="penalty_points" value="0">
+                            </div>
+                            <div class="input-group" style="display: flex; align-items: center; justify-content: center; height: 100%;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0;">
+                                    <input type="checkbox" name="adr_permit" style="width: auto;">
+                                    ADR vorhanden
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <button type="submit" class="btn-primary">Mitarbeiter einstellen</button>
+                        <a href="personnel_manager.php" class="btn-primary" style="background-color: #7f8c8d; text-decoration: none; display: inline-block; padding: 10px 20px; border-radius: 3px;">Abbrechen</a>
+                    </div>
+                </form>
+            </div>
         <?php endif; ?>
 
-        <!-- NATIVES EINKLAPPBARES IMPORT-PANEL -->
-        <details class="form-box">
-            <summary class="accent-text" style="cursor: pointer; font-weight: 600;">📥 Stellenmarkt-Quelltext einlesen (HTML Import)</summary>
-            <form method="post" action="personnel_manager.php" style="margin-top: 15px;">
-                <input type="hidden" name="action" value="import_personnel">
-                <label for="import_data">Fügen Sie hier den kompletten HTML-Quelltext der Ingame-Stellengesuche ein (Fahrer &amp; Disponenten):</label>
-                <textarea id="import_data" name="import_data" class="import-textarea" placeholder="HTML-Quellcode kopieren und hier einfügen..." required></textarea>
-                <button type="submit" class="btn-primary">Personal-Daten importieren</button>
-            </form>
-        </details>
+        <!-- NATIVES EINKLAPPBARES IMPORT-PANEL & NEUANLAGE TRIGGER -->
+        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+            <details class="form-box" style="flex: 1; margin-bottom: 0;">
+                <summary class="accent-text" style="cursor: pointer; font-weight: 600;">📥 Stellenmarkt-Quelltext einlesen (HTML Import)</summary>
+                <form method="post" action="personnel_manager.php" style="margin-top: 15px;">
+                    <input type="hidden" name="action" value="import_personnel">
+                    <label for="import_data">Fügen Sie hier den kompletten HTML-Quelltext der Ingame-Stellengesuche ein (Fahrer &amp; Disponenten):</label>
+                    <textarea id="import_data" name="import_data" class="import-textarea" placeholder="HTML-Quellcode kopieren und hier einfügen..." required></textarea>
+                    <button type="submit" class="btn-primary">Personal-Daten importieren</button>
+                </form>
+            </details>
+            <div style="display: flex; align-items: stretch;">
+                <a href="?action=add" class="btn-primary" style="text-decoration: none; display: flex; align-items: center; text-align: center; justify-content: center; padding: 0 20px; border-radius: 5px;">➕ Neuen Mitarbeiter manuell einstellen</a>
+            </div>
+        </div>
 
         <!-- COCKPIT FILTERPANEL (EINZELNE TABELLE, ZENTRALE WEICHE) -->
         <div class="filter-panel" style="margin-top: 25px;">
@@ -803,6 +916,20 @@ foreach ($allPersonnel as $p) {
 
     <!-- Client-Side Filter, Suche, Sortierung und State-Persistenz -->
     <script>
+        // --- Dynamische Neuanlagen-Eingabemaske (Blendet Rollenfelder sauber aus) ---
+        function toggleCreateRoleFields(role) {
+            const driverFields = document.getElementById('createDriverFields');
+            const skillField = document.getElementById('createSkillField');
+            
+            if (driverFields) {
+                driverFields.style.setProperty('display', (role === 'fahrer') ? 'contents' : 'none');
+            }
+            if (skillField) {
+                // Bürokräfte und Tankwarte haben laut Ingame-Regeln keinen Skillwert
+                skillField.style.setProperty('display', (role === 'bürokraft' || role === 'tankwart') ? 'none' : 'block');
+            }
+        }
+
         // -------------------------------------------------------------
         // STATE-MANAGEMENT (LocalStorage-Persistenz)
         // -------------------------------------------------------------
@@ -878,6 +1005,12 @@ foreach ($allPersonnel as $p) {
         window.addEventListener('DOMContentLoaded', () => {
             restoreHRState();
             applyPersonnelFilter();
+            
+            // Wenn das Neuanlage-Formular geladen wird, initialen Formular-Zustand setzen
+            const createSelect = document.getElementById('createRoleSelect');
+            if (createSelect) {
+                toggleCreateRoleFields(createSelect.value);
+            }
         });
 
         // -------------------------------------------------------------

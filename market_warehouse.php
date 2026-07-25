@@ -73,9 +73,23 @@ class WarehouseSynchronizer
                 ");
                 $stmtUpdateAssigned->execute([$existingId]);
                 return 2; // Code 2: Zeitstempel aktualisiert (Tonnage geschützt!)
-            } else {
-                // Fall B: IDN liegt unverplant im Lagerpool.
-                // Wir aktualisieren die verbleibende Tonnage und den Zeitstempel last_seen_at.
+        } else {
+                // Fall B: IDN liegt unverplant im Lagerpool (Subtraktions-Garantie zur Heilung der Tonnagen-Inflation)
+                // Wir ermitteln die bereits auf LKWs verplante Tonnage aktiver, unarchivierter Split-Klone
+                $stmtClonesWeight = $this->pdo->prepare("
+                    SELECT COALESCE(SUM(weight_total), 0) 
+                    FROM orders 
+                    WHERE ingame_order_id LIKE ? 
+                        AND assigned_truck_id IS NOT NULL 
+                        AND is_archived = 0
+                ");
+                $stmtClonesWeight->execute([$order['ingame_order_id'] . '-%']);
+                $assignedClonesWeight = (int)$stmtClonesWeight->fetchColumn();
+
+                // Ziehe verplante Klone von der importierten Ingame-Tonnage ab, um Inflation zu verhindern
+                $adjustedRemaining = max(0, (int)$order['weight_remaining'] - $assignedClonesWeight);
+
+                // Wir aktualisieren die bereinigte verbleibende Tonnage und den Zeitstempel
                 $stmtUpdatePool = $this->pdo->prepare("
                     UPDATE orders 
                     SET weight_remaining = ?, 
@@ -83,8 +97,8 @@ class WarehouseSynchronizer
                         is_archived = 0
                     WHERE id = ?
                 ");
-                $stmtUpdatePool->execute([$order['weight_remaining'], $existingId]);
-                return 2; // Code 2: Pool-Restmenge aktualisiert
+                $stmtUpdatePool->execute([$adjustedRemaining, $existingId]);
+                return 2; // Code 2: Pool-Restmenge bereinigt aktualisiert
             }
         }
 
