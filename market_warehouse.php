@@ -53,16 +53,37 @@ class WarehouseSynchronizer
     public function syncOrder(array $order): int
     {
         // 1. DUBLETTEN-SCHUTZ: Prüfen, ob die IDN bereits global im System existiert (PH 2.5.1.3)
-        $stmtCheckIDN = $this->pdo->prepare("SELECT id, assigned_truck_id FROM orders WHERE ingame_order_id = ? LIMIT 1");
+        // KORREKTUR: Fragt zusätzlich 'is_archived' ab, um voreilige Archivierungen aufzuspüren.
+        $stmtCheckIDN = $this->pdo->prepare("SELECT id, assigned_truck_id, is_archived FROM orders WHERE ingame_order_id = ? LIMIT 1");
         $stmtCheckIDN->execute([$order['ingame_order_id']]);
         $existingOrder = $stmtCheckIDN->fetch(PDO::FETCH_ASSOC);
 
         if ($existingOrder !== false) {
             $existingId = (int)$existingOrder['id'];
             $assignedTruckId = $existingOrder['assigned_truck_id'];
+            $isArchived = (int)$existingOrder['is_archived'];
+
+            if ($isArchived === 1) {
+                // FALL C: Voreilige oder versehentliche Archivierung im ERP! (PH-Erweiterung)
+                // Wir heilen den Status (is_archived = 0, is_accepted = 1) und aktualisieren die Tonnage.
+                // Aber: Wir entkoppeln den Job strikt vom LKW (assigned_truck_id = NULL),
+                // um dessen aktuellen geographischen Fahrplan vor Geister-Leerfahrten zu schützen.
+                $stmtHealAndDecouple = $this->pdo->prepare("
+                    UPDATE orders 
+                    SET is_archived = 0,
+                        is_accepted = 1,
+                        assigned_truck_id = NULL,
+                        assigned_at = NULL,
+                        weight_remaining = ?,
+                        last_seen_at = NOW()
+                    WHERE id = ?
+                ");
+                $stmtHealAndDecouple->execute([$order['weight_remaining'], $existingId]);
+                return 1; // Code 1: Frisch reaktiviert und unverplant ins Lager zurückgebucht
+            }
 
             if ($assignedTruckId !== null) {
-                // Fall A: IDN ist bereits auf einem LKW geladen.
+                // Fall A: IDN ist bereits auf einem LKW geladen (und nicht archiviert).
                 // Wir schützen die verplante Tonnage (weight_remaining bleibt UNBERÜHRT!),
                 // aktualisieren aber den Zeitstempel, damit das LKW-Segment nicht fälschlicherweise archiviert wird.
                 $stmtUpdateAssigned = $this->pdo->prepare("
@@ -73,15 +94,15 @@ class WarehouseSynchronizer
                 ");
                 $stmtUpdateAssigned->execute([$existingId]);
                 return 2; // Code 2: Zeitstempel aktualisiert (Tonnage geschützt!)
-        } else {
+            } else {
                 // Fall B: IDN liegt unverplant im Lagerpool (Subtraktions-Garantie zur Heilung der Tonnagen-Inflation)
                 // Wir ermitteln die bereits auf LKWs verplante Tonnage aktiver, unarchivierter Split-Klone
                 $stmtClonesWeight = $this->pdo->prepare("
                     SELECT COALESCE(SUM(weight_total), 0) 
                     FROM orders 
                     WHERE ingame_order_id LIKE ? 
-                        AND assigned_truck_id IS NOT NULL 
-                        AND is_archived = 0
+                      AND assigned_truck_id IS NOT NULL 
+                      AND is_archived = 0
                 ");
                 $stmtClonesWeight->execute([$order['ingame_order_id'] . '-%']);
                 $assignedClonesWeight = (int)$stmtClonesWeight->fetchColumn();
