@@ -379,7 +379,7 @@ $normalizeFreight = function(string $type): string {
                     <?php echo htmlspecialchars($o['commodity']); ?> (<?php echo htmlspecialchars($o['freight_type']); ?>)
                 </td>
                 <td><?php echo $o['weight_total']; ?> t</td>
-                <td><?php echo number_format((float)$o['revenue'], 2, ',', '.'); ?> €</td>
+                <td><span class="copy-city" title="Klicken zum Kopieren"><?php echo number_format((float)$o['revenue'], 2, ',', '.'); ?> €</span></td>
                 <td><?php echo $o['km']; ?> km</td>
                 <!-- Farblich deklariertes Kilometer-Erlös Feld -->
                 <td class="<?php echo $o['price_class']; ?>">
@@ -516,6 +516,32 @@ $normalizeFreight = function(string $type): string {
 
             rows.forEach(row => tbody.appendChild(row));
         }
+
+        // --- Live-Kopieren von Frachterlösen in US-Schreibweise (PH § 1.4.5) ---
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.classList.contains('copy-city')) {
+                let textToCopy = e.target.textContent.trim();
+                
+                // Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
+                if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
+                    // Währungssymbole und Whitespaces entfernen
+                    textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
+                    // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
+                    textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
+                }
+                
+                // Native Zwischenablage-API nutzen
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    // Visuelles Erfolgs-Feedback (Flasht kurz orange)
+                    e.target.classList.add('text-orange');
+                    setTimeout(() => {
+                        e.target.classList.remove('text-orange');
+                    }, 500);
+                }).catch(err => {
+                    // Geräuschloser Fallback
+                });
+            }
+        });
     </script>
 </body>
 </html>
