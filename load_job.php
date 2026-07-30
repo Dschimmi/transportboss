@@ -30,6 +30,12 @@ class JobLoader
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
+        // Selbstheilende Schema-Migration: assigned_at auf Mikroskunden DATETIME(6) hochstufen
+        try {
+            $this->pdo->exec("ALTER TABLE orders MODIFY COLUMN assigned_at DATETIME(6) NULL DEFAULT NULL");
+        } catch (Exception $e) {
+            // Ignorieren falls bereits geschehen
+        }
     }
 
     /**
@@ -124,7 +130,7 @@ class JobLoader
                     ) VALUES (
                         :idn, :fingerprint, :freight_type, :commodity, :is_adr, 
                         :weight_total, :weight_remaining, :revenue, :from_city_id, :to_city_id, 
-                        :is_accepted, 0, :assigned_truck_id, NOW(), NOW()
+                        :is_accepted, 0, :assigned_truck_id, NOW(6), NOW()
                     )
                 ");
                 $stmtInsertSplit->execute([
@@ -147,7 +153,7 @@ class JobLoader
                 $stmtAssign = $this->pdo->prepare("
                     UPDATE orders 
                     SET assigned_truck_id = ?, 
-                        assigned_at = NOW(), 
+                        assigned_at = NOW(6), 
                         last_seen_at = NOW() 
                     WHERE id = ?
                 ");

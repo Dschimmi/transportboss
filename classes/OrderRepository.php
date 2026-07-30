@@ -75,7 +75,7 @@ class OrderRepository
     {
         $stmt = $this->pdo->prepare("
             UPDATE orders
-            SET assigned_truck_id = :truck_id, assigned_at = NOW(), is_accepted = 1
+            SET assigned_truck_id = :truck_id, assigned_at = NOW(6), is_accepted = 1
             WHERE id = :order_id
         ");
         $stmt->execute([
@@ -151,7 +151,7 @@ class OrderRepository
             ) VALUES (
                 :ingame_order_id, :freight_type, :commodity, :is_adr, :weight_total, :weight_remaining,
                 :revenue, :from_city_id, :to_city_id, :is_accepted, :is_archived, :assigned_truck_id,
-                :assigned_at, :last_seen_at
+                COALESCE(:assigned_at, NOW(6)), :last_seen_at
             ) ON DUPLICATE KEY UPDATE
                 weight_remaining = VALUES(weight_remaining),
                 last_seen_at = VALUES(last_seen_at),
