@@ -320,6 +320,7 @@ class PersonnelController
 
     /**
      * Lädt alle Profile und mappt sie in ein einheitliches Tabellenmodell.
+     * Ermittelt zusätzlich die Ampel-Kennzeichnung für Fahrer-Bewerber auf Basis von Ingame-Namenskollisionen.
      */
     public function getPersonnelModel(): array
     {
@@ -338,11 +339,50 @@ class PersonnelController
         $allPersonnel = [];
         $roleValues = [];
 
+        // Vorab-Map aller angestellten Fahrer für die Namenskollisions-Prüfung
+        $employedDriverMap = [];
         foreach ($drivers as $d) {
+            if ((int)$d['is_employed'] === 1) {
+                $lName = mb_strtolower(trim($d['last_name']));
+                $initial = mb_substr(mb_strtolower(trim($d['first_name'])), 0, 1);
+                $employedDriverMap[$lName][] = $initial;
+            }
+        }
+
+        foreach ($drivers as $d) {
+            // Ampel-Ermittlung exklusiv für Fahrer-Bewerber
+            $nameColorClass = '';
+            $nameTooltip = '';
+
+            if ((int)$d['is_employed'] === 0) {
+                $appLName = mb_strtolower(trim($d['last_name']));
+                $appInitial = mb_substr(mb_strtolower(trim($d['first_name'])), 0, 1);
+
+                if (isset($employedDriverMap[$appLName])) {
+                    if (in_array($appInitial, $employedDriverMap[$appLName], true)) {
+                        // ROT: Identischer Nachname + Gleiche Initialen wie ein angestellter Fahrer
+                        $nameColorClass = 'price-very-bad';
+                        $nameTooltip = 'KRITISCHE KOLLISION: Ein angestellter Fahrer hat dieselbe Ingame-Anzeige (' . htmlspecialchars($d['last_name']) . ', ' . strtoupper($appInitial) . '.)!';
+                    } else {
+                        // GELB: Identischer Nachname, aber andere Initialen
+                        $nameColorClass = 'price-average';
+                        $nameTooltip = 'NAMENSÄHNLICHKEIT: Nachname ' . htmlspecialchars($d['last_name']) . ' existiert bereits im angestellten Fahrpersonal.';
+                    }
+                } else {
+                    // GRÜN: Eindeutiger Nachname
+                    $nameColorClass = 'price-good';
+                    $nameTooltip = 'EINDEUTIGER NAME: Nachname existiert noch nicht im angestellten Fahrpersonal.';
+                }
+            }
+
             $item = [
                 'id' => (int)$d['id'],
                 'ingame_id' => $d['ingame_driver_id'],
+                'first_name' => $d['first_name'],
+                'last_name' => $d['last_name'],
                 'name' => $d['first_name'] . ' ' . $d['last_name'],
+                'name_color_class' => $nameColorClass,
+                'name_tooltip' => $nameTooltip,
                 'role' => 'fahrer',
                 'role_label' => '🚚 Fahrer',
                 'age' => (int)$d['age'],
@@ -374,7 +414,11 @@ class PersonnelController
             $item = [
                 'id' => (int)$disp['id'],
                 'ingame_id' => $disp['ingame_dispatcher_id'],
+                'first_name' => $disp['first_name'],
+                'last_name' => $disp['last_name'],
                 'name' => $disp['first_name'] . ' ' . $disp['last_name'],
+                'name_color_class' => '',
+                'name_tooltip' => '',
                 'role' => $roleKey,
                 'role_label' => $roleLabelMap[$roleKey] ?? ucfirst($roleKey),
                 'age' => (int)$disp['age'],
@@ -818,7 +862,7 @@ foreach ($allPersonnel as $p) {
                         data-active-applicant="<?= $p['is_active_applicant'] ?>">
                         <td><strong><?= $p['role_label'] ?></strong></td>
                         <td>
-                            <strong><?= htmlspecialchars($p['name']) ?></strong><br>
+                            <strong class="<?= $p['name_color_class'] ?? '' ?>" title="<?= $p['name_tooltip'] ?? '' ?>"><?= htmlspecialchars($p['name']) ?></strong><br>
                             <small class="text-gray">Personal-Nr: <?= $p['ingame_id'] ?></small>
                         </td>
                         <td><?= $p['age'] ?></td>

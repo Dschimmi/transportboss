@@ -26,8 +26,8 @@ class TopologyEngine
      * ob ein anderes Fahrzeug der gesamten Spedition diese Fracht transportieren könnte. Falls nein, wird die Sperre verworfen.
      *
      * KORREKTUR:
-     * - Prüft die Weiche gegen die GESAMTE owned Flotte (nicht nur aktive LKW), da unbesetzte LKW trotzdem den Typ repräsentieren!
-     * - Prüft das RESTGEWICHT (weight_remaining) bei der Kapazitäts-Kollision, damit die Kleinen Reste-Wegkehren dürfen!
+     * - Erlaubt Teilladungs-Übernahmen! Ein anderes Fahrzeug gilt als besserer Kandidat, 
+     *   wenn es kompatibel ist und eine größere Kapazität als die Max-Sperre des aktuellen LKW besitzt.
      *
      * @param array $order Der zu prüfende Auftragsdatensatz
      * @param array $truck Der zu beplanende LKW
@@ -56,36 +56,44 @@ class TopologyEngine
                 continue;
             }
 
-            // A. Physische Kompatibilität des anderen LKWs prüfen
-            if (!$this->isTypeCompatible($order['freight_type'], $otherTruck['vehicle_type'])) {
+            // A. Physische Kompatibilität des anderen LKWs prüfen (KORREKTUR: Statischer self:: Aufruf)
+            if (!self::isTypeCompatible($order['freight_type'], $otherTruck['vehicle_type'])) {
                 continue;
             }
 
-            // B. Gewichtskapazität des anderen LKWs prüfen (KORREKTUR: verbleibendes Restgewicht prüfen!)
-            if ((int)$order['weight_remaining'] > (int)$otherTruck['capacity_t']) {
-                continue;
-            }
-
-            // C. Eigene Gewichts-Sperren des anderen LKWs prüfen
+            // B. Eigene Gewichts-Sperren des anderen LKWs prüfen
             $otherMin = (int)($otherTruck['min_weight_t'] ?? 0);
             $otherMax = (int)($otherTruck['max_weight_t'] ?? 0);
             
+            // Kann der andere LKW dieses Gewicht regulär laden (ohne seine eigenen Sperren zu verletzen)?
             $otherAllowedByMin = ($weight >= $otherMin);
             $otherAllowedByMax = ($otherMax === 0 || $weight <= $otherMax);
 
+            // C. Teilladungs-Sicherheitsprüfung bei MAX-Verletzungen des kleinen LKWs:
+            // Ein anderer LKW ist nur dann ein fahrbarer Ausweg, wenn seine physische Kapazität 
+            // auch tatsächlich GRÖSSER ist als das Limit (Max-Sperre oder Kapazität) des aktuellen kleinen LKWs.
+            if (!$allowedByMax) {
+                $maxAllowedOnCurrent = $max > 0 ? $max : $truck['capacity_t'];
+                if ((int)$otherTruck['capacity_t'] <= $maxAllowedOnCurrent) {
+                    // Der andere LKW hat keine größere Kapazität, ist also kein besserer Kandidat.
+                    continue;
+                }
+            }
+
+            // Wenn der andere LKW für diese Tonnage zulässig ist, bleibt die Sperre für den kleinen LKW aktiv!
             if ($otherAllowedByMin && $otherAllowedByMax) {
                 $anyOtherCanHaul = true;
-                break; // Ein anderes Fahrzeug im Fuhrpark kann den Job regelkonform fahren!
+                break; // Ein anderes, besser geeignetes Fahrzeug im Fuhrpark kann den Job fahren!
             }
         }
 
-        // Falls kein anderes Fahrzeug diesen Job regelkonform fahren kann,
+        // Falls kein anderes Fahrzeug diesen Job besser oder regelkonform fahren kann,
         // verwerfen wir die Gewichts-Sperre für diesen LKW, damit der Job fahrbar bleibt!
         if (!$anyOtherCanHaul) {
-            return true; // Sperre aufgehoben!
+            return true; // Sperre aufgehoben (Notfall-Laden erlaubt)
         }
 
-        return false; // Sperre bleibt aktiv, da ein anderes Fahrzeug den Job regelkonform fahren kann.
+        return false; // Sperre bleibt aktiv (Ein geeigneterer LKW existiert im Fuhrpark)
     }
 
     /**
@@ -211,7 +219,7 @@ class TopologyEngine
 
                 foreach ($virtualOrderPool as $index => $op) {
                     if ($op['weight_remaining'] <= 0) continue;
-                    if (!$this->isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
+                    if (!self::isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
                     if ($op['is_adr'] === 1 && $driverAdr === 0) continue;
                     if (!in_array($op['from_city_id'], $neighborhood, true)) continue;
                     if ($op['is_accepted'] === 0 && $marketOrdersCount >= $freeMarketSlots) continue;
@@ -221,9 +229,14 @@ class TopologyEngine
 
                     // Nutzt das instanziierte distanceService-Objekt der Klasse
                     $emptyRunDist = $this->distanceService->getDistance($currentEndpoint, $op['from_city_id']);
-                    $profitability = $op['revenue'] / $op['weight_total'];
+                    
+                    // KORREKTUR: Berechnet die exakte proportionale Kilometer-Marge des LKW für diese Fahrt
+                    $loadedWeight = min((int)$op['weight_remaining'], (int)$t['capacity_t']);
+                    $proportionalRevenue = ($op['revenue'] / $op['weight_total']) * $loadedWeight;
+                    $routeDistance = $this->distanceService->getDistance((int)$op['from_city_id'], (int)$op['to_city_id']);
+                    $profitability = $proportionalRevenue / max(1, $routeDistance);
 
-                    if ($bestCandidate === null 
+                    if ($bestCandidate === null
                         || $emptyRunDist < $bestCandidate['empty_run_dist'] 
                         || ($emptyRunDist === $bestCandidate['empty_run_dist'] && $profitability > $bestCandidate['profitability'])) {
                         
@@ -312,8 +325,8 @@ class TopologyEngine
 
         $suggestions = [];
         foreach ($orders as $order) {
-            // Fahrzeugtyp prüfen
-            if (!$this->isTypeCompatible($order['freight_type'], $truck['vehicle_type'])) {
+            // Fahrzeugtyp prüfen (KORREKTUR: Statischer self:: Aufruf)
+            if (!self::isTypeCompatible($order['freight_type'], $truck['vehicle_type'])) {
                 continue;
             }
 
@@ -339,10 +352,16 @@ class TopologyEngine
 
             $distanceToOrder = $this->distanceService->getDistance($currentCityId, $order['from_city_id']);
             $routeDistance = $this->distanceService->getDistance($order['from_city_id'], $order['to_city_id']);
+            
+            // KORREKTUR: Berechnet die proportionale Kilometer-Marge des LKW für diese Fahrt
+            $loadedWeight = min((int)$order['weight_remaining'], (int)$truck['capacity_t']);
+            $proportionalRevenue = ($order['revenue'] / $order['weight_total']) * $loadedWeight;
+            $tripYield = $proportionalRevenue / max(1, $routeDistance);
+
             $suggestions[] = [
                 'order' => $order,
                 'distance_to_order' => $distanceToOrder,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max($routeDistance, 1)),
+                'earning_per_tkm' => $tripYield,
                 'is_fallback' => false,
                 'status' => $order['is_accepted'] ? 'warehouse' : 'market'
             ];
@@ -359,10 +378,16 @@ class TopologyEngine
 
                 $distanceToOrder = $this->distanceService->getDistance($currentCityId, $fallbackOrder['from_city_id']);
                 $routeDistance = $this->distanceService->getDistance($fallbackOrder['from_city_id'], $fallbackOrder['to_city_id']);
+                
+                // KORREKTUR: Berechnet die proportionale Kilometer-Marge des LKW für diese Fallback-Fahrt
+                $loadedWeight = min((int)$fallbackOrder['weight_remaining'], (int)$truck['capacity_t']);
+                $proportionalRevenue = ($fallbackOrder['revenue'] / $fallbackOrder['weight_total']) * $loadedWeight;
+                $tripYield = $proportionalRevenue / max(1, $routeDistance);
+
                 $suggestions[] = [
                     'order' => $fallbackOrder,
                     'distance_to_order' => $distanceToOrder,
-                    'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
+                    'earning_per_tkm' => $tripYield,
                     'is_fallback' => true,
                     'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market'
                 ];
@@ -402,8 +427,10 @@ class TopologyEngine
 
     /**
      * Prüft, ob ein Frachttyp mit einem Fahrzeugtyp kompatibel ist (PH 3.3 Matrix-Abgleich).
+     *
+     * KORREKTUR: Statische Deklaration für die systemweite, redundanzfreie Nutzung (DRY-Soll).
      */
-    public function isTypeCompatible(string $freightType, string $vehicleType): bool
+    public static function isTypeCompatible(string $freightType, string $vehicleType): bool
     {
         $normalize = function(string $type): string {
             $lower = strtolower($type);
@@ -623,15 +650,9 @@ class TopologyEngine
     /**
      * Taktisches Radar: Findet ALLE kompatiblen Aufträge im 3-Städte-Radius (Auswahl-Garantie, PH § 9.3.4)
      * und bereichert sie um den vorausschauenden Ketten-Radar-Indikator.
-     *
-     * KORREKTUR:
-     * - Behebt den Call to undefined method isFreightCompatible Fehler durch Aufruf von isTypeCompatible (public geschaltet!)
-     * - Behebt den getCitiesDistance Fehler durch korrekten Aufruf des distanceService
-     * - Keine Vermischung von benannten und anonymen SQL-Parametern mehr
-     * - Prüft die Planungs-Checkbox (liefert [] bei is_active_planning = 0)
-     * - Sortiert die Frachten streng nach kürzester physischen Anfahrt (0 km zuerst)
-     * - Füllt die Vorschläge über die Fallback-Engine stabil auf mindestens 3 Optionen auf (Padding)
-     * - Schließt bereits verplante 0-Tonnen-Splitreste konsequent aus (weight_remaining > 0)
+     * 
+     * KORREKTUR: Verletzungen der Tonnage-Sperren blockieren den Scan nicht mehr hart, 
+     * sondern werden als Flag 'violates_weight_lock' übergeben.
      *
      * @param int $truckId Die ID des LKW
      * @param int $currentCityId Start- oder Tourende-Stadt des LKW
@@ -639,7 +660,7 @@ class TopologyEngine
      */
     public function getRadarScanForTruck(int $truckId, int $currentCityId): array
     {
-        // 1. Fahrzeugdaten und Planungsstatus auslesen (min_weight_t und max_weight_t mitladen!)
+        // 1. Fahrzeugdaten und Planungsstatus auslesen
         $truckStmt = $this->pdo->prepare("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t, is_active_planning FROM trucks WHERE id = ?");
         $truckStmt->execute([$truckId]);
         $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
@@ -652,7 +673,7 @@ class TopologyEngine
         $capacity = (int)$truck['capacity_t'];
         $vehicleType = $truck['vehicle_type'];
 
-        // Lade alle owned LKWs zur Auswertung der Tonnagen-Sicherheitsweiche (PH § Exception)
+        // Lade alle owned LKWs zur Auswertung der Tonnagen-Sicherheitsweiche
         $stmtAllOwned = $this->pdo->query("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks");
         $allOwnedTrucks = $stmtAllOwned->fetchAll(PDO::FETCH_ASSOC);
 
@@ -684,13 +705,13 @@ class TopologyEngine
         $driverHasAdr = $this->hasAdrDriverForTruck($truckId);
 
         foreach ($orders as $order) {
-            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden
-            if (!$this->isTypeCompatible($order['freight_type'], $vehicleType)) continue;
+            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden (KORREKTUR: Statischer self:: Aufruf)
+            if (!self::isTypeCompatible($order['freight_type'], $vehicleType)) continue;
 
             if ($order['is_adr'] && !$driverHasAdr) continue;
 
-            // Tonnagen-Sperren und "Reste-Kehrlogik" prüfen (PH § Tonnage-Sperren)
-            if (!$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks)) continue;
+            // KORREKTUR: Tonnagen-Sperren werden für das Radar nicht mehr gefiltert, sondern nur als Flag registriert!
+            $violatesWeightLock = !$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks);
 
             $emptyRunDist = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
             $loadedWeight = min((int)$order['weight_remaining'], $capacity);
@@ -699,21 +720,25 @@ class TopologyEngine
             // Simuliere die vorausschauende Kette (Radar-Stufe)
             $radarIndicator = $this->simulateRadarChain((int)$order['to_city_id'], $truckId, $vehicleType, $capacity);
 
+            // KORREKTUR: Berechnet die reale proportionale Kilometer-Marge des LKW für das Radar-Ranking
+            $proportionalRevenue = ($order['revenue'] / $order['weight_total']) * $loadedWeight;
+            $routeDistance = $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']);
+            $tripYield = $proportionalRevenue / max(1, $routeDistance);
+
             $radarScan[] = [
                 'order' => $order,
                 'loaded_weight' => $loadedWeight,
-                'available_weight' => (int)$order['weight_total'], // KORREKTUR: Zeigt die original Gesamttonnage (57 t) statt der Restmenge!
+                'available_weight' => (int)$order['weight_total'],
                 'is_split' => $isSplit,
                 'empty_run_dist' => $emptyRunDist,
-                'earning_per_tkm' => $order['revenue'] / ($order['weight_total'] * max(1, $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']))),
+                'earning_per_tkm' => $tripYield, // Nutzt die LKW-spezifische Marge für das Sortierungs-Ranking
                 'status' => (int)$order['is_accepted'] === 1 ? 'warehouse' : 'market',
-                'radar_indicator' => $radarIndicator
+                'radar_indicator' => $radarIndicator,
+                'violates_weight_lock' => $violatesWeightLock
             ];
         }
 
-        // 4. DIE 3er-GARANTIE (PADDING):
-        // Haben wir weniger als 3 regionale Ergebnisse, ziehen wir globale Alternativen hinzu,
-        // ebenfalls streng sortiert nach kürzester Anfahrt!
+        // 4. DIE 3er-GARANTIE (PADDING)
         if (count($radarScan) < 3) {
             $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity);
             $existingIds = array_column(array_column($radarScan, 'order'), 'id');
@@ -724,10 +749,10 @@ class TopologyEngine
                     continue;
                 }
 
-                // Tonnagen-Restriktionen für Fallback prüfen
-                if (!$this->isOrderAllowedByWeight($fallbackOrder, $truck, $allOwnedTrucks)) continue;
+                // KORREKTUR: Auch beim Fallback wird das Limit nicht mehr hart blockiert
+                $violatesWeightLock = !$this->isOrderAllowedByWeight($fallbackOrder, $truck, $allOwnedTrucks);
 
-                $distanceToOrder = $fallbackOrder['empty_run_dist']; // Bereits in der Fallback-Engine berechnet!
+                $distanceToOrder = $fallbackOrder['empty_run_dist'];
                 $routeDistance = $this->distanceService->getDistance((int)$fallbackOrder['from_city_id'], (int)$fallbackOrder['to_city_id']);
                 
                 $loadedWeight = min((int)$fallbackOrder['weight_remaining'], $capacity);
@@ -736,13 +761,14 @@ class TopologyEngine
                 $radarScan[] = [
                     'order' => $fallbackOrder,
                     'loaded_weight' => $loadedWeight,
-                    'available_weight' => (int)$fallbackOrder['weight_total'], // KORREKTUR: Zeigt die original Gesamttonnage (57 t) statt der Restmenge!
+                    'available_weight' => (int)$fallbackOrder['weight_total'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $distanceToOrder,
                     'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
                     'is_fallback' => true,
                     'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market',
-                    'radar_indicator' => $this->simulateRadarChain((int)$fallbackOrder['to_city_id'], $truckId, $vehicleType, $capacity)
+                    'radar_indicator' => $this->simulateRadarChain((int)$fallbackOrder['to_city_id'], $truckId, $vehicleType, $capacity),
+                    'violates_weight_lock' => $violatesWeightLock
                 ];
 
                 if (count($radarScan) >= 3) {

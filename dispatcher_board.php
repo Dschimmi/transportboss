@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
 /**
  * dispatcher_board.php
  *
@@ -64,6 +66,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'deactivate_all_trucks') {
     $pdo->exec("UPDATE trucks SET is_active_planning = 0");
     header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
+// Tourvorschläge explizit generieren und in der Session zwischenspeichern (Performance-Bremse)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'generate_proposals') {
+    $suggestedChains = $topologyEngine->calculateAutopilotChains();
+    $_SESSION['tb_suggested_chains'] = $suggestedChains;
+    $_SESSION['tb_suggested_chains_time'] = date('H:i:s');
+    
+    $redirectId = isset($_POST['focus_truck_id']) ? (int)$_POST['focus_truck_id'] : 0;
+    header("Location: dispatcher_board.php?focus_truck_id=" . $redirectId);
     exit;
 }
 
@@ -289,7 +302,70 @@ foreach ($allTrucks as $t) {
 }
 
 // Holt die berechneten Ketten direkt über die einheitliche, gekapselte Klassen-Methode (PH § 1.3.1)
-$suggestedChains = $topologyEngine->calculateAutopilotChains();
+$suggestedChains = $_SESSION['tb_suggested_chains'] ?? [];
+
+// --- LIVE-HYDRIERUNG & SPEICHER-BEREINIGUNG (DYNAMISCHE VORSCHLAGSLISTE) ---
+if (!empty($suggestedChains)) {
+    $collectedOrderIds = [];
+    foreach ($suggestedChains as $tId => $chain) {
+        foreach ($chain as $step) {
+            if (isset($step['order']['id'])) {
+                $collectedOrderIds[] = (int)$step['order']['id'];
+            }
+        }
+    }
+    $collectedOrderIds = array_unique($collectedOrderIds);
+
+    if (!empty($collectedOrderIds)) {
+        $placeholders = implode(',', array_fill(0, count($collectedOrderIds), '?'));
+        $stmtLive = $pdo->prepare("
+            SELECT id, ingame_order_id, is_accepted, weight_remaining, weight_total, revenue, assigned_truck_id, is_archived 
+            FROM orders 
+            WHERE id IN ($placeholders)
+        ");
+        $stmtLive->execute(array_values($collectedOrderIds));
+        $liveOrders = $stmtLive->fetchAll(PDO::FETCH_ASSOC);
+
+        $liveMap = [];
+        foreach ($liveOrders as $lo) {
+            $liveMap[(int)$lo['id']] = $lo;
+        }
+
+        foreach ($suggestedChains as $tId => &$chain) {
+            foreach ($chain as $sKey => &$step) {
+                $oId = (int)($step['order']['id'] ?? 0);
+
+                if (!isset($liveMap[$oId])) {
+                    unset($chain[$sKey]);
+                    continue;
+                }
+
+                $live = $liveMap[$oId];
+
+                if ((int)$live['is_archived'] === 1 || (int)$live['weight_remaining'] <= 0) {
+                    unset($chain[$sKey]);
+                    continue;
+                }
+
+                if ($live['assigned_truck_id'] !== null && (int)$live['assigned_truck_id'] !== (int)$tId) {
+                    unset($chain[$sKey]);
+                    continue;
+                }
+
+                $step['order']['ingame_order_id']  = $live['ingame_order_id'];
+                $step['order']['is_accepted']      = (int)$live['is_accepted'];
+                $step['order']['weight_remaining'] = (int)$live['weight_remaining'];
+                $step['order']['revenue']          = (float)$live['revenue'];
+                $step['status']                    = ((int)$live['is_accepted'] === 1) ? 'warehouse' : 'market';
+                $step['available_weight']          = (int)$live['weight_total'];
+            }
+            $chain = array_values($chain);
+        }
+        unset($chain, $step);
+
+        $_SESSION['tb_suggested_chains'] = $suggestedChains;
+    }
+}
 
 // Ermittlung absoluter Inkompatibilitäten für das visuelle Alarm-System (PH 4.4.5)
 // Unabhängige, performante Echtzeit-Abfrage ohne Alt-Abhängigkeiten!
@@ -359,7 +435,17 @@ if ($focusTruck) {
 <body class="board-body">
     <?php require_once 'nav.php'; ?>
     <div class="fluid-container">
-        <h1 class="accent-text">Dispatcher Board</h1>
+        <div class="workspace-header-row">
+            <h1 class="accent-text">Dispatcher Board</h1>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span class="text-gray" style="font-size:0.85em;">🤖 Vorschläge Stand: <strong class="text-orange"><?= isset($_SESSION['tb_suggested_chains_time']) ? $_SESSION['tb_suggested_chains_time'] . ' Uhr' : 'Keine' ?></strong></span>
+                <form method="post" style="margin: 0;" onsubmit="showLoadingOverlay();">
+                    <input type="hidden" name="action" value="generate_proposals">
+                    <input type="hidden" name="focus_truck_id" value="<?= $focusTruckId ?>">
+                    <button type="submit" class="btn-primary">🤖 Tourvorschläge generieren</button>
+                </form>
+            </div>
+        </div>
         <div class="board-layout">
             
             <!-- SPALTE 1 (LINKS): Sidebar (Strategic Monitor) -->
@@ -395,11 +481,13 @@ if ($focusTruck) {
             <!-- SPALTE 2 (MITTE): Kompakte LKW-Auswahlbuttons -->
             <div class="board-middle">
                 
-                <!-- Alle Fahrzeuge deaktivieren (Am Kopf platziert, um Fehlklicks zu vermeiden) -->
-                <form method="post">
-                    <input type="hidden" name="action" value="deactivate_all_trucks">
-                    <button type="submit" class="btn-primary btn-danger btn-small" onclick="return confirm('Möchten Sie wirklich alle LKW für die Disposition deaktivieren?')">❌ Alle deaktivieren</button>
-                </form>
+                <!-- Alle Fahrzeuge deaktivieren (Vertikaler Block) -->
+                <div class="input-group">
+                    <form method="post">
+                        <input type="hidden" name="action" value="deactivate_all_trucks">
+                        <button type="submit" class="btn-primary btn-danger btn-small" onclick="return confirm('Möchten Sie wirklich alle LKW für die Disposition deaktivieren?')">❌ Alle deaktivieren</button>
+                    </form>
+                </div>
 
                 <h2 class="accent-text sidebar-title">Fuhrpark (<?= $activePlanningCount ?> aktiv)</h2>
 
@@ -742,6 +830,14 @@ if ($focusTruck) {
 
     <!-- JavaScript für Filter, globalen Toggle und LKW-Fokus (PH 1.4.5) -->
     <script>
+        // Unübersehbares Fullscreen Loading Overlay mit animiertem Ladebalken
+        function showLoadingOverlay() {
+            let o = document.createElement('div');
+            o.className = 'loading-overlay';
+            o.innerHTML = '<div class="loading-box">⏳ Tourvorschläge werden berechnet...<br><small style="font-weight:normal; font-size:0.8em; color:#aaa;">Bitte einen Moment Geduld.</small><div class="loading-bar"><div class="loading-bar-progress"></div></div></div>';
+            document.body.appendChild(o);
+        }
+
         // Steuert den LKW-Fokus und leitet nativ über den HTML-Anker weiter (Keine zuckenden JS-Berechnungen mehr)
         function selectTruck(truckId) {
             if (window.getSelection().toString() !== '') {

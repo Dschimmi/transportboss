@@ -171,6 +171,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
     try {
         $loader = new JobLoader($pdo);
         $loader->execute($truckId, $orderId);
+
+        // --- SCHRITT 1: AUSTRAGUNG DES GELADENEN JOBS AUS DER SESSION-KETTES DES LKW ---
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
+            foreach ($_SESSION['tb_suggested_chains'][$truckId] as $key => $step) {
+                if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
+                    unset($_SESSION['tb_suggested_chains'][$truckId][$key]);
+                    // Array-Indizes nach dem Löschen wieder fortlaufend nummerieren
+                    $_SESSION['tb_suggested_chains'][$truckId] = array_values($_SESSION['tb_suggested_chains'][$truckId]);
+                    break;
+                }
+            }
+        }
     } catch (Exception $e) {
         // KORREKTUR: Zeigt den genauen Fehlergrund an, anstatt ihn stillschweigend zu ignorieren
         die("Fataler Fehler beim Zuweisen des Auftrags: " . $e->getMessage());

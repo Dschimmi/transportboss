@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
 /**
  * dispatcher_board.php
  *
@@ -57,6 +59,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     // Holt die ID des fokussierten Fahrzeugs direkt aus dem Formular-Post
     $redirectId = isset($_POST['focus_truck_id']) ? (int)$_POST['focus_truck_id'] : 0;
     header("Location: dispatcher_board.php?focus_truck_id=" . $redirectId);
+    exit;
+}
+
+// Alle Fahrzeuge für die Disposition deaktivieren (PH-konformer Batch-Reset)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'deactivate_all_trucks') {
+    $pdo->exec("UPDATE trucks SET is_active_planning = 0");
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
+// Tourvorschläge explizit generieren und in der Session zwischenspeichern (Performance-Bremse)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'generate_proposals') {
+    $suggestedChains = $topologyEngine->calculateAutopilotChains();
+    $_SESSION['tb_suggested_chains'] = $suggestedChains;
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
     exit;
 }
 
@@ -214,6 +231,14 @@ $allTrucks = $pdo->query("
     ORDER BY job_count ASC, t.id ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+// Aktiv-Planungszähler im Speicher ermitteln (0% zusätzliche DB-Last)
+$activePlanningCount = 0;
+foreach ($allTrucks as $t) {
+    if ((int)$t['is_active_planning'] === 1) {
+        $activePlanningCount++;
+    }
+}
+
 // Alle Fahrer für schnellen Map-Lookup laden (Vermeidet N+1 Queries)
 $allDrivers = $driverRepo->getAllEmployed();
 $driverMap = [];
@@ -235,51 +260,6 @@ $cities = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // --- HELFER-FUNKTIONEN FÜR DEN ALGORITHMUS ---
-
-function isFreightCompatible(string $vehicleType, string $freightType): bool {
-    // Hilfsfunktion zur internen Normalisierung von Ingame-Frachtbezeichnungen
-    $normalize = function(string $type): string {
-        $lower = strtolower($type);
-        if (str_contains($lower, 'silo')) return 'Silo';
-        if (str_contains($lower, 'flüssig') || str_contains($lower, 'tank')) return 'Tankwagen';
-        if (str_contains($lower, 'kühl')) return 'Kühlwagen';
-        if (str_contains($lower, 'schütt')) return 'Schüttgut';
-        if (str_contains($lower, 'kurier')) return 'Kurier';
-        if (str_contains($lower, 'pritsche')) return 'Pritsche';
-        if (str_contains($lower, 'iso')) return 'ISO-Container';
-        if (str_contains($lower, 'schwer')) return 'Schwertransport';
-        if (str_contains($lower, 'koffer')) return 'Koffer';
-        if (str_contains($lower, 'plane')) return 'Plane';
-        if (str_contains($lower, 'stück')) return 'Stückgut';
-        return $type;
-    };
-
-    $vType = $normalize($vehicleType);
-    $fType = $normalize($freightType);
-
-    if ($vType === $fType) {
-        return true;
-    }
-
-    // Ihre vollständige fahrzeugübergreifende Kompatibilitätsmatrix (PH 3.3)
-    $matrix = [
-        'Kurier' => ['Kurier', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
-        'Stückgut' => ['Stückgut', 'Kurier', 'Pritsche', 'Plane', 'Koffer'],
-        'Schüttgut' => ['Schüttgut'],
-        'Pritsche' => ['Pritsche', 'Schüttgut'],
-        'Plane' => ['Plane', 'Stückgut', 'Pritsche'],
-        'Koffer' => ['Koffer', 'Stückgut', 'Pritsche', 'Plane'],
-        'Kühlwagen' => ['Kühlwagen', 'Stückgut', 'Pritsche', 'Plane', 'Koffer'],
-        'Silo' => ['Silo'],
-        'Tankwagen' => ['Tankwagen'],
-        'Schwertransport' => ['Schwertransport'],
-        'ISO-Container' => ['ISO-Container'],
-        'Super-Liner' => ['Super-Liner', 'Stückgut', 'Pritsche', 'Plane', 'Koffer']
-    ];
-
-    return in_array($fType, $matrix[$vType] ?? [], true);
-}
-
 function get3CityNeighborhood(PDO $pdo, int $cityId): array {
     $stmtNear = $pdo->prepare("
         SELECT city_b_id AS city_id, distance_km FROM distances WHERE city_a_id = :cityId
@@ -319,7 +299,7 @@ foreach ($allTrucks as $t) {
 }
 
 // Holt die berechneten Ketten direkt über die einheitliche, gekapselte Klassen-Methode (PH § 1.3.1)
-$suggestedChains = $topologyEngine->calculateAutopilotChains();
+$suggestedChains = $_SESSION['tb_suggested_chains'] ?? [];
 
 // Ermittlung absoluter Inkompatibilitäten für das visuelle Alarm-System (PH 4.4.5)
 // Unabhängige, performante Echtzeit-Abfrage ohne Alt-Abhängigkeiten!
@@ -337,7 +317,8 @@ foreach ($activeTrucks as $at) {
     $driverHasAdr = isset($driverMap[$at['assigned_driver_id']]) ? (bool)$driverMap[$at['assigned_driver_id']]['adr_permit'] : false;
     
     foreach ($unassignedOrdersForAlert as $o) {
-        if (isFreightCompatible($at['vehicle_type'], $o['freight_type'])) {
+        // KORREKTUR: Nutzt die unifizierte, statische Klassen-Methode (DRY-Soll)
+        if (TopologyEngine::isTypeCompatible($o['freight_type'], $at['vehicle_type'])) {
             if ($o['is_adr'] === 0 || $driverHasAdr) {
                 $hasAnyCompatible = true;
                 break;
@@ -423,7 +404,27 @@ if ($focusTruck) {
 
             <!-- SPALTE 2 (MITTE): Kompakte LKW-Auswahlbuttons -->
             <div class="board-middle">
-                <h2 class="accent-text sidebar-title">Fuhrpark</h2>
+                
+                <!-- Alle Fahrzeuge deaktivieren (Vertikaler Block) -->
+                <div class="input-group">
+                    <form method="post">
+                        <input type="hidden" name="action" value="deactivate_all_trucks">
+                        <button type="submit" class="btn-primary btn-danger btn-small" onclick="return confirm('Möchten Sie wirklich alle LKW für die Disposition deaktivieren?')">❌ Alle deaktivieren</button>
+                    </form>
+                </div>
+
+                <!-- Tourvorschläge generieren (Vertikaler Block) -->
+                <div class="input-group">
+                    <form method="post">
+                        <input type="hidden" name="action" value="generate_proposals">
+                        <button type="submit" class="btn-primary btn-small">🤖 Tourvorschläge generieren</button>
+                    </form>
+                </div>
+
+                <h2 class="accent-text sidebar-title">Fuhrpark (<?= $activePlanningCount ?> aktiv)</h2>
+
+                <!-- Schnellsuche-Eingabefeld (Prominent unter dem Titel platziert) -->
+                <input type="text" id="truckSearch" class="filter-input city-filter-input" placeholder="LKW, Fahrer, Typ, ID oder Tonnen filtern..." onkeyup="applyTruckFilter()">
                 
                 <?php foreach ($allTrucks as $truck): ?>
                 <?php 
@@ -437,12 +438,12 @@ if ($focusTruck) {
                 $isFocussed = ($truck['id'] == $focusTruckId);
                 $driver = $driverMap[$truck['assigned_driver_id']] ?? null;
                 ?>
-                <!-- Zweizeiliger kompakter LKW-Button (Dynamische Zustände via Klassen abgebildet) -->
+                <!-- Zweizeiliger kompakter LKW-Button (Inhalte getauscht nach PH-Soll) -->
                 <div id="truck-<?php echo $truck['id']; ?>"
                      class="truck-btn <?php echo $truck['is_active_planning'] ? 'truck-btn-active' : 'truck-btn-inactive'; ?> <?php echo $isFocussed ? 'truck-btn-focussed' : ''; ?>" 
                      onclick="selectTruck(<?php echo $truck['id']; ?>)">
                     
-                    <!-- Reihe 1: Aktiv-Checkbox, Typ & Kapazität, geplante Jobs -->
+                    <!-- Reihe 1 (Oben, größer): Aktiv-Checkbox, Fahrername & ADR-Badge, geplante Jobs-Anzahl -->
                     <div class="btn-row-1">
                         <div class="truck-btn-header-left">
                             <form method="post" class="checkbox-planning-form" onclick="event.stopPropagation();">
@@ -451,14 +452,6 @@ if ($focusTruck) {
                                 <input type="hidden" name="state" value="<?= $truck['is_active_planning'] ? 0 : 1 ?>">
                                 <input type="checkbox" <?= $truck['is_active_planning'] ? 'checked' : '' ?> onchange="this.form.submit()" class="checkbox-planning">
                             </form>
-                            <span><?= htmlspecialchars($truck['vehicle_type']) ?> (<?= $truck['capacity_t'] ?>t)</span>
-                        </div>
-                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
-                    </div>
-
-                    <!-- Reihe 2: Fahrername, ADR & virtuelles Tourende -->
-                    <div class="btn-row-2">
-                        <div>
                             <?php if ($driver): ?>
                                 <span><?= htmlspecialchars($driver['last_name'] . ', ' . substr($driver['first_name'], 0, 1) . '.') ?></span>
                                 <?= $driver['adr_permit'] ? '<span class="adr-badge">[ADR]</span>' : '' ?>
@@ -466,17 +459,23 @@ if ($focusTruck) {
                                 <span class="driver-unassigned">Unbesetzt</span>
                             <?php endif; ?>
                         </div>
+                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                    </div>
+
+                    <!-- Reihe 2 (Unten, kleiner): LKW ID, Typ & Kapazität, virtuelles Tourende / POS -->
+                    <div class="btn-row-2">
+                        <div>
+                            <span>ID: <?= htmlspecialchars($truck['ingame_vehicle_id']) ?> - <?= htmlspecialchars($truck['vehicle_type']) ?> (<?= $truck['capacity_t'] ?>t)</span>
+                        </div>
                         <div>
                             <?php
                             $lastOrder = $orderRepo->getLastOrderForTruck((int)$truck['id']);
                             if ($lastOrder) {
                                 $tourEndCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$lastOrder['to_city_id'])->fetchColumn();
-                                // Wenn isAlert wahr ist, färben wir den Zielort in Warnrot
                                 $cityClass = $isAlert ? 'text-tour-end-alert' : 'text-tour-end';
                                 echo '<span class="' . $cityClass . '">➔ ' . htmlspecialchars($tourEndCity) . '</span>';
                             } else {
                                 $currentCity = $pdo->query("SELECT name FROM cities WHERE id = " . (int)$truck['current_city_id'])->fetchColumn();
-                                // Wenn isAlert wahr ist, färben wir den POS-Ort in Warnrot
                                 $cityClass = $isAlert ? 'text-pos-alert' : 'text-pos';
                                 echo '<span class="' . $cityClass . '">➔ POS: ' . htmlspecialchars($currentCity) . '</span>';
                             }
@@ -491,16 +490,22 @@ if ($focusTruck) {
             <div class="board-right-workspace">
                 <?php if ($focusTruck): ?>
                     
-                    <!-- OBERE HÄLFTE: Geplante Tour -->
+                    <!-- OBERE HÄLFTE: Geplante Tour (Fahrer & Spezifikation in der Überschrift) -->
                     <div class="detail-top-half" onclick="event.stopPropagation();">
+                        <?php
+                        $focusDriver = $driverMap[$focusTruck['assigned_driver_id']] ?? null;
+                        $focusDriverName = $focusDriver ? htmlspecialchars($focusDriver['last_name'] . ', ' . substr($focusDriver['first_name'], 0, 1) . '.') : 'Unbesetzt';
+                        ?>
                         <h3 class="accent-text workspace-title">
-                            Geplante Tour für LKW ID: <?= htmlspecialchars($focusTruck['ingame_vehicle_id']) ?> (<?= htmlspecialchars($focusTruck['vehicle_type']) ?>)
+                            Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
                         </h3>
                         <table class="suggestion-table workspace-table">
                             <thead>
                                 <tr>
                                     <th>Erledigt?</th>
+                                    <th>Status</th>
                                     <th>Typ</th>
+                                    <th>Art</th>
                                     <th>Route</th>
                                     <th>Distanz</th>
                                     <th>Tonnage</th>
@@ -528,14 +533,16 @@ if ($focusTruck) {
                                         $orderFromId = (int)$order['from_city_id'];
                                         $orderToId = (int)$order['to_city_id'];
 
-                                        // Leerfahrten-Berechnung
+                                        // Leerfahrten-Berechnung (Kopierbare Städte, angepasst an 9-Spalten-Layout)
                                         if ($orderFromId !== $currentCityId) {
                                             $emptyDistance = $distanceService->getDistance($currentCityId, $orderFromId);
                                             $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn();
                                             echo '<tr class="row-type-empty">
                                                 <td></td>
                                                 <td class="text-warning-bold">LEERFAHRT</td>
-                                                <td>' . htmlspecialchars($fromCityName) . ' ➔ ' . htmlspecialchars($order['from_city_name']) . '</td>
+                                                <td>-</td>
+                                                <td>-</td>
+                                                <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($fromCityName) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span></td>
                                                 <td>' . $emptyDistance . ' km</td>
                                                 <td>-</td>
                                                 <td>0,00 €</td>
@@ -544,9 +551,11 @@ if ($focusTruck) {
                                             $currentCityId = $orderFromId;
                                         }
 
-                                        // Cargo-Berechnung "on the fly" mit echtem LAGER/BÖRSE Status
+                                        // Cargo-Berechnung "on the fly" mit echtem LAGER/BÖRSE Status (IDN-Ersetzung & Kopier-Span)
                                         $jobDistance = $distanceService->getDistance($orderFromId, $orderToId);
-                                        $jobTypeLabel = ((int)$order['is_accepted'] === 1) ? 'LAGER' : 'BÖRSE';
+                                        $jobTypeLabel = ((int)$order['is_accepted'] === 1) 
+                                            ? '<span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['ingame_order_id'] ?? 'LAGER') . '</span>' 
+                                            : 'BÖRSE';
                                         $jobTypeColor = ((int)$order['is_accepted'] === 1) ? 'text-lager' : 'text-market';
 
                                         // -------------------------------------------------------------
@@ -608,7 +617,9 @@ if ($focusTruck) {
                                                 </form>
                                             </td>
                                             <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
-                                            <td>' . htmlspecialchars($order['from_city_name']) . ' ➔ ' . htmlspecialchars($order['to_city_name']) . '</td>
+                                            <td>' . htmlspecialchars($order['freight_type']) . '</td>
+                                            <td>' . htmlspecialchars($order['commodity']) . '</td>
+                                            <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span></td>
                                             <td>' . $jobDistance . ' km</td>
                                             <td>' . $order['weight_remaining'] . ' t / ' . $availableAtLoading . ' t</td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
@@ -645,26 +656,35 @@ if ($focusTruck) {
                         if (!empty($focusSuggestions)): 
                         ?>
                             <table class="suggestion-table workspace-table">
-                                <thead>
-                                    <tr>
-                                        <th>Laden?</th> <!-- GANZ LINKS -->
-                                        <th>Auftrags-ID</th>
-                                        <th>Route</th>
-                                        <th>Typ</th>
-                                        <th>Gewicht (Ladung)</th>
-                                        <th>Erlös</th>
-                                        <th>Leerfahrt</th>
-                                        <?php if ($planningMode === 'radar'): ?>
-                                            <th>Ketten-Radar</th>
-                                        <?php endif; ?>
-                                        <th>Status</th>
-                                        <th>Aktion</th> <!-- ARCHIVIEREN GANZ RECHTS -->
-                                    </tr>
-                                </thead>
+                            <thead>
+                                <tr>
+                                    <th>Erledigt?</th>
+                                    <th>Status</th>
+                                    <th>Typ</th>
+                                    <th>Art</th>
+                                    <th>Route</th>
+                                    <th>Distanz</th>
+                                    <th>Tonnage</th>
+                                    <th>Erlös</th>
+                                    <th>Aktionen</th>
+                                </tr>
+                            </thead>
                                 <tbody>
                                     <?php foreach ($focusSuggestions as $suggestion): ?>
-                                    <?php $order = $suggestion['order']; ?>
-                                    <tr class="<?php echo $suggestion['is_split'] ? 'row-split-load' : ''; ?>">
+                                    <?php 
+                                    $order = $suggestion['order']; 
+                                    
+                                    // Dynamische CSS-Klassen für den Zeilenstatus generieren
+                                    $rowClasses = [];
+                                    if ($suggestion['is_split']) {
+                                        $rowClasses[] = 'row-split-load';
+                                    }
+                                    if (!empty($suggestion['violates_weight_lock'])) {
+                                        $rowClasses[] = 'row-type-empty'; // Rötliche Einfärbung zur Visualisierung der Warnung
+                                    }
+                                    $rowClassStr = implode(' ', $rowClasses);
+                                    ?>
+                                    <tr class="<?php echo $rowClassStr; ?>">
                                         <td>
                                             <!-- Laden-Button ganz links -->
                                             <form method="post" action="load_job.php">
@@ -673,16 +693,25 @@ if ($focusTruck) {
                                                 <button type="submit" class="btn-primary btn-load">Laden</button>
                                             </form>
                                         </td>
-                                        <td><?php echo htmlspecialchars($order['ingame_order_id'] ?? 'Marktpool'); ?></td>
                                         <td>
-                                            <?php echo htmlspecialchars($order['from_city_name']); ?>
-                                            ➔ <?php echo htmlspecialchars($order['to_city_name']); ?>
+                                            <?php if (!empty($order['ingame_order_id'])): ?>
+                                                <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['ingame_order_id']); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-muted-italic">Marktpool</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['from_city_name']); ?></span>
+                                            ➔ <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['to_city_name']); ?></span>
                                         </td>
                                         <td><?php echo htmlspecialchars($order['freight_type']); ?></td>
-                                        <td>
+                                        <td class="<?php echo !empty($suggestion['violates_weight_lock']) ? 'text-warning-bold' : ''; ?>">
                                             <?php echo $suggestion['loaded_weight']; ?> t / <?php echo $suggestion['available_weight']; ?> t
+                                            <?php if (!empty($suggestion['violates_weight_lock'])): ?>
+                                                <br><small class="text-warning-bold">[Tonnage-Sperre]</small>
+                                            <?php endif; ?>
                                         </td>
-                                        <td><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</td>
+                                        <td><span class="copy-city" title="Klicken zum Kopieren"><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</span></td>
                                         <td>
                                             <?php echo $suggestion['empty_run_dist']; ?> km
                                             <?php echo $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>'; ?>
@@ -760,6 +789,67 @@ if ($focusTruck) {
                 }
                 row.style.display = match ? '' : 'none';
             });
+        });
+        // --- Live LKW-Filtersteuerung für die Fuhrpark-Spalte ---
+        function applyTruckFilter() {
+            const query = document.getElementById('truckSearch').value.toLowerCase();
+            const keywords = query.split(/\s+/).filter(k => k.trim() !== '');
+            const buttons = document.querySelectorAll('.truck-btn');
+
+            buttons.forEach(btn => {
+                const text = btn.textContent.toLowerCase();
+                let match = true;
+                
+                // Prüfe, ob alle eingegebenen Suchbegriffe auf der LKW-Karte vorkommen (UND-Verknüpfung)
+                for (let kw of keywords) {
+                    if (!text.includes(kw)) {
+                        match = false;
+                        break;
+                    }
+                }
+                
+                // Setzt die CSS-Anzeige-Eigenschaft zurück oder schaltet sie ab (Sicherheits-Integrität)
+                if (match) {
+                    btn.style.setProperty('display', 'flex', 'important');
+                } else {
+                    btn.style.setProperty('display', 'none', 'important');
+                }
+            });
+        }
+        // --- Live-Kopieren von Städtenamen, IDNs und konvertierten Geldbeträgen (PH § 1.4.5) ---
+        ['.detail-top-half', '.detail-bottom-half'].forEach(selector => {
+            const container = document.querySelector(selector);
+            if (container) {
+                container.addEventListener('click', function(e) {
+                    if (e.target && e.target.classList.contains('copy-city')) {
+                        let textToCopy = e.target.textContent.trim();
+                        
+                        // 1. Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
+                        if (textToCopy.startsWith('IDN') && textToCopy.includes('-')) {
+                            textToCopy = textToCopy.split('-')[0];
+                        }
+                        
+                        // 2. Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
+                        if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
+                            // Währungssymbole und Whitespaces entfernen
+                            textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
+                            // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
+                            textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
+                        }
+                        
+                        // Native Zwischenablage-API nutzen
+                        navigator.clipboard.writeText(textToCopy).then(() => {
+                            // Visuelles Erfolgs-Feedback (Flasht kurz orange)
+                            e.target.classList.add('text-orange');
+                            setTimeout(() => {
+                                e.target.classList.remove('text-orange');
+                            }, 500);
+                        }).catch(err => {
+                            // Geräuschloser Fallback
+                        });
+                    }
+                });
+            }
         });
     </script>
 </body>

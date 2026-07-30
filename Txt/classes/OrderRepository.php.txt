@@ -14,7 +14,10 @@ class OrderRepository
     }
 
     /**
-     * Lädt alle offenen Aufträge (nicht archiviert, nicht zugewiesen).
+     * Lädt alle offenen Aufträge (nicht archiviert, nicht zugewiesen, akzeptierte Lageraufträge).
+     *
+     * KORREKTUR: Begrenzt die Zählung streng auf angenommene Lageraufträge (is_accepted = 1),
+     * um eine Inflationierung durch unverbindliche Marktpool-Angebote auf dem Dashboard zu verhindern.
      *
      * @return int Anzahl der offenen Aufträge
      */
@@ -24,6 +27,7 @@ class OrderRepository
             SELECT COUNT(*) AS count
             FROM orders
             WHERE is_archived = 0
+            AND is_accepted = 1
             AND (assigned_truck_id IS NULL OR assigned_truck_id = 0)
         ");
         return (int)$stmt->fetch(PDO::FETCH_ASSOC)['count'];

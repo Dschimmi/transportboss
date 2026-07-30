@@ -327,11 +327,17 @@ $activeFleet = $pdo->query("
     ORDER BY t.km_stand DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Liste der ungebundenen, eingestellten Fahrer für Dropdowns
+// Liste der ungebundenen, eingestellten Fahrer für Dropdowns (PH-konform & Synchronisationssicher)
 $freeDrivers = $pdo->query("
     SELECT id, ingame_driver_id, first_name, last_name, skill_val, adr_permit 
     FROM drivers 
-    WHERE is_employed = 1 AND assigned_truck_id IS NULL 
+    WHERE is_employed = 1 
+      AND (assigned_truck_id IS NULL OR assigned_truck_id = 0)
+      AND ingame_driver_id NOT IN (
+          SELECT assigned_driver_id 
+          FROM trucks 
+          WHERE assigned_driver_id IS NOT NULL AND assigned_driver_id != ''
+      )
     ORDER BY last_name ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 

@@ -64,10 +64,7 @@ class WarehouseSynchronizer
             $isArchived = (int)$existingOrder['is_archived'];
 
             if ($isArchived === 1) {
-                // FALL C: Voreilige oder versehentliche Archivierung im ERP! (PH-Erweiterung)
-                // Wir heilen den Status (is_archived = 0, is_accepted = 1) und aktualisieren die Tonnage.
-                // Aber: Wir entkoppeln den Job strikt vom LKW (assigned_truck_id = NULL),
-                // um dessen aktuellen geographischen Fahrplan vor Geister-Leerfahrten zu schützen.
+                // FALL C: Voreilige oder versehentliche Archivierung im ERP!
                 $stmtHealAndDecouple = $this->pdo->prepare("
                     UPDATE orders 
                     SET is_archived = 0,
@@ -79,13 +76,11 @@ class WarehouseSynchronizer
                     WHERE id = ?
                 ");
                 $stmtHealAndDecouple->execute([$order['weight_remaining'], $existingId]);
-                return 1; // Code 1: Frisch reaktiviert und unverplant ins Lager zurückgebucht
+                return 1;
             }
 
             if ($assignedTruckId !== null) {
-                // Fall A: IDN ist bereits auf einem LKW geladen (und nicht archiviert).
-                // Wir schützen die verplante Tonnage (weight_remaining bleibt UNBERÜHRT!),
-                // aktualisieren aber den Zeitstempel, damit das LKW-Segment nicht fälschlicherweise archiviert wird.
+                // Fall A: IDN ist bereits auf einem LKW geladen
                 $stmtUpdateAssigned = $this->pdo->prepare("
                     UPDATE orders 
                     SET last_seen_at = NOW(),
@@ -93,10 +88,12 @@ class WarehouseSynchronizer
                     WHERE id = ?
                 ");
                 $stmtUpdateAssigned->execute([$existingId]);
-                return 2; // Code 2: Zeitstempel aktualisiert (Tonnage geschützt!)
+                return 2;
             } else {
-                // Fall B: IDN liegt unverplant im Lagerpool (Subtraktions-Garantie zur Heilung der Tonnagen-Inflation)
-                // Wir ermitteln die bereits auf LKWs verplante Tonnage aktiver, unarchivierter Split-Klone
+                // Fall B: IDN liegt im Lagerpool.
+                // RETROAKTIVE HEILUNG: Prüfe, ob unakzeptierte Teilstücke auf LKWs zu dieser IDN gehören!
+                $this->propagateMarriageToClones($existingId, $order['ingame_order_id']);
+
                 $stmtClonesWeight = $this->pdo->prepare("
                     SELECT COALESCE(SUM(weight_total), 0) 
                     FROM orders 
@@ -107,10 +104,8 @@ class WarehouseSynchronizer
                 $stmtClonesWeight->execute([$order['ingame_order_id'] . '-%']);
                 $assignedClonesWeight = (int)$stmtClonesWeight->fetchColumn();
 
-                // Ziehe verplante Klone von der importierten Ingame-Tonnage ab, um Inflation zu verhindern
                 $adjustedRemaining = max(0, (int)$order['weight_remaining'] - $assignedClonesWeight);
 
-                // Wir aktualisieren die bereinigte verbleibende Tonnage und den Zeitstempel
                 $stmtUpdatePool = $this->pdo->prepare("
                     UPDATE orders 
                     SET weight_remaining = ?, 
@@ -119,7 +114,7 @@ class WarehouseSynchronizer
                     WHERE id = ?
                 ");
                 $stmtUpdatePool->execute([$adjustedRemaining, $existingId]);
-                return 2; // Code 2: Pool-Restmenge bereinigt aktualisiert
+                return 2;
             }
         }
 
@@ -137,22 +132,35 @@ class WarehouseSynchronizer
         // indem wir die Einschränkung 'assigned_truck_id IS NULL' aufheben.
         // Bereits zugewiesene Aufträge werden bei der Sortierung bevorzugt, damit die LKW-Tour aktualisiert wird.
         // Wir nutzen eine Delta-Prüfung ABS(revenue - :revenue) < 0.01, um Float-Präzisionsfehler bei DECIMAL-Spalten zu verhindern.
+        // KORREKTUR: Fingerprint- & Frachtraten-Matching (€/t) für Teilladungen/Splits!
+        $unitRate = (int)$order['weight_total'] > 0 ? ((float)$order['revenue'] / (int)$order['weight_total']) : 0.0;
+
         $stmtSearch = $this->pdo->prepare("
-            SELECT id, is_archived FROM orders 
+            SELECT id, is_archived 
+            FROM orders 
             WHERE is_accepted = 0 
-              AND from_city_id = :from_city
-              AND to_city_id = :to_city
-              AND weight_total = :weight_total
-              AND ABS(revenue - :revenue) < 0.01
-            ORDER BY assigned_truck_id DESC, is_archived ASC, id DESC
+              AND is_archived = 0
+              AND (
+                    (fingerprint IS NOT NULL AND fingerprint = :fingerprint)
+                 OR (
+                    from_city_id = :from_city 
+                AND to_city_id = :to_city 
+                AND (
+                    ABS((revenue / NULLIF(weight_total, 0)) - :unit_rate_1) < 0.05
+                 OR ABS((revenue / NULLIF(weight_remaining, 0)) - :unit_rate_2) < 0.05
+                )
+                 )
+              )
+            ORDER BY assigned_truck_id DESC, id DESC
             LIMIT 1
         ");
 
         $stmtSearch->execute([
-            'from_city' => $order['from_city_id'],
-            'to_city' => $order['to_city_id'],
-            'weight_total' => $order['weight_total'],
-            'revenue' => $order['revenue']
+            'fingerprint' => $order['fingerprint'] ?? '',
+            'from_city'   => $order['from_city_id'],
+            'to_city'     => $order['to_city_id'],
+            'unit_rate_1' => $unitRate,
+            'unit_rate_2' => $unitRate
         ]);
 
         $matched = $stmtSearch->fetch(PDO::FETCH_ASSOC);
@@ -173,6 +181,10 @@ class WarehouseSynchronizer
                 'weight_remaining' => $order['weight_remaining'],
                 'id' => (int)$matched['id']
             ]);
+
+            // --- NEU: PROPAGIERUNG AN BEREITS GELADENE TEILSTÜCKE AUF LKWS ---
+            $this->propagateMarriageToClones((int)$matched['id'], $order['ingame_order_id']);
+
             return 1; // Code 1: Frisch verheiratet / Reaktiviert
         }
 
@@ -187,19 +199,102 @@ class WarehouseSynchronizer
             )
         ");
         $stmtInsert->execute([
-            'idn' => $order['ingame_order_id'],
-            'freight_type' => $order['freight_type'],
-            'commodity' => $order['commodity'],
-            'is_adr' => $order['is_adr'],
-            'weight_total' => $order['weight_total'],
-            'weight_remaining' => $order['weight_remaining'],
-            'revenue' => $order['revenue'],
-            'from_city' => $order['from_city_id'],
-            'to_city' => $order['to_city_id']
-        ]);
-        return 3; // Code 3: Autonom neu angelegt
+                'idn' => $order['ingame_order_id'],
+                'freight_type' => $order['freight_type'],
+                'commodity' => $order['commodity'],
+                'is_adr' => $order['is_adr'],
+                'weight_total' => $order['weight_total'],
+                'weight_remaining' => $order['weight_remaining'],
+                'revenue' => $order['revenue'],
+                'from_city' => $order['from_city_id'],
+                'to_city' => $order['to_city_id']
+            ]);
+            return 3; // Code 3: Autonom neu angelegt
+        }
+
+        /**
+         * Propagiert die IDN-Verheiratung und den Lager-Status (is_accepted = 1) 
+         * an alle bereits verplanten Teilladungs-Klone auf den LKW.
+         */
+        private function propagateMarriageToClones(int $parentOrderId, string $baseIdn): void
+        {
+            // 1. Stammdaten des Mutter-Auftrags ermitteln
+            $stmtInfo = $this->pdo->prepare("SELECT fingerprint, from_city_id, to_city_id, weight_total, revenue FROM orders WHERE id = ?");
+            $stmtInfo->execute([$parentOrderId]);
+            $parent = $stmtInfo->fetch(PDO::FETCH_ASSOC);
+
+            if (!$parent) {
+                return;
+            }
+
+            $fingerprint = $parent['fingerprint'];
+            $unitRate = (int)$parent['weight_total'] > 0 ? ((float)$parent['revenue'] / (int)$parent['weight_total']) : 0.0;
+
+            // 2. Alle noch unakzeptierten Klone auf LKWs suchen (per Fingerprint ODER Route + Frachtrate)
+            $stmtClones = $this->pdo->prepare("
+                SELECT id 
+                FROM orders 
+                WHERE is_accepted = 0 
+                  AND assigned_truck_id IS NOT NULL 
+                  AND is_archived = 0
+                  AND (
+                        (fingerprint IS NOT NULL AND fingerprint = :fingerprint)
+                     OR (
+                        from_city_id = :from_city 
+                    AND to_city_id = :to_city 
+                    AND (
+                        ABS((revenue / NULLIF(weight_total, 0)) - :unit_rate_1) < 0.05
+                     OR ABS((revenue / NULLIF(weight_remaining, 0)) - :unit_rate_2) < 0.05
+                    )
+                     )
+                  )
+                ORDER BY id ASC
+            ");
+            $stmtClones->execute([
+                'fingerprint' => $fingerprint ?? '',
+                'from_city'   => $parent['from_city_id'],
+                'to_city'     => $parent['to_city_id'],
+                'unit_rate_1' => $unitRate,
+                'unit_rate_2' => $unitRate
+            ]);
+            $clones = $stmtClones->fetchAll(PDO::FETCH_COLUMN);
+
+            if (empty($clones)) {
+                return;
+            }
+
+            // 3. Bereits existierende Suffixe für diese IDN ermitteln
+            $stmtSuffixes = $this->pdo->prepare("SELECT ingame_order_id FROM orders WHERE ingame_order_id LIKE ?");
+            $stmtSuffixes->execute([$baseIdn . '-%']);
+            $existingSuffixes = $stmtSuffixes->fetchAll(PDO::FETCH_COLUMN);
+
+            $maxSuffix = 0;
+            foreach ($existingSuffixes as $existingIdn) {
+                $parts = explode('-', $existingIdn);
+                if (isset($parts[1])) {
+                    $suffixNum = (int)$parts[1];
+                    if ($suffixNum > $maxSuffix) {
+                        $maxSuffix = $suffixNum;
+                    }
+                }
+            }
+
+            // 4. Jeden Klon auf dem LKW aktivieren und mit fortlaufender Suffix-IDN versehen
+            $stmtUpdateClone = $this->pdo->prepare("
+                UPDATE orders 
+                SET ingame_order_id = ?, 
+                    is_accepted = 1, 
+                    last_seen_at = NOW() 
+                WHERE id = ?
+            ");
+
+            foreach ($clones as $cloneId) {
+                $maxSuffix++;
+                $splitIdn = $baseIdn . '-' . $maxSuffix;
+                $stmtUpdateClone->execute([$splitIdn, (int)$cloneId]);
+            }
+        }
     }
-}
 
 // Variablen für die Benutzerführung
 $message = '';

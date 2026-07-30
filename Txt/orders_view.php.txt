@@ -84,12 +84,16 @@ class OrdersViewController
      * Holt alle offenen Börsenangebote, berechnet die Marge pro Kilometer,
      * vergleicht diese mit den historischen Durchschnittswerten und sortiert nach Profitabilität.
      *
+     * KORREKTUR: Integriert die prädiktive "Fleet-Max-Bremse" (Säule 1) zur restlosen Eliminierung
+     * der Tonnagen-Illusion bei Großaufträgen basierend auf dem gesamten, angestellten Fuhrpark.
+     * Nutzt die statische Schnittstelle TopologyEngine::isTypeCompatible (DRY-Soll).
+     *
      * @param array $historicalAverages Die zuvor geladenen historischen Durchschnittswerte
      * @return array Liste der sortierten Angebote mit Marge und Farbstufen-Klassifizierung
      */
     public function getProfitabilityRanking(array $historicalAverages): array
     {
-        // Offene Börsen-Aufträge (is_accepted = 0, is_archived = 0) laden (ID für Dispo-Abgleich hinzugefügt!)
+        // Offene, noch unzugeordnete Börsen-Aufträge laden
         $stmt = $this->pdo->query("
             SELECT 
                 o.id, o.freight_type, o.commodity, o.is_adr, o.weight_total, o.revenue,
@@ -98,20 +102,47 @@ class OrdersViewController
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
-            WHERE o.is_accepted = 0 AND o.is_archived = 0
+            WHERE o.is_accepted = 0 
+              AND o.is_archived = 0 
+              AND o.assigned_truck_id IS NULL
         ");
         $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Alle angestellten LKW des gesamten Fuhrparks laden (PH-Soll: unabh. von Dispo-Aktivierung)
+        $stmtFleet = $this->pdo->query("
+            SELECT capacity_t, vehicle_type 
+            FROM trucks 
+            WHERE assigned_driver_id IS NOT NULL AND assigned_driver_id != ''
+        ");
+        $fleet = $stmtFleet->fetchAll(PDO::FETCH_ASSOC);
 
         // Globaler Fallback-Wert, falls für eine Ware noch kein historischer Wert vorliegt (2.50 €/km)
         $globalAvg = !empty($historicalAverages) ? array_sum($historicalAverages) / count($historicalAverages) : 2.50;
 
-        // Ertrags-Kilometer-Marge live und on the fly kalkulieren
+        // Ertrags-Kilometer-Marge unter Einbezug der Fleet-Max-Bremse kalkulieren
         foreach ($orders as &$order) {
             $km = $this->distanceService->getDistance((int)$order['from_id'], (int)$order['to_id']);
             $order['km'] = $km;
             
-            // Division durch Null bei identischen Städten verhindern
-            $currentKmRate = $km > 0 ? (float)$order['revenue'] / $km : 0.0;
+            // 1. Größte physisch kompatible LKW-Kapazität im gesamten Fuhrpark ermitteln
+            $maxCompatibleCap = 0;
+            foreach ($fleet as $truck) {
+                if (TopologyEngine::isTypeCompatible($order['freight_type'], $truck['vehicle_type'])) {
+                    if ((int)$truck['capacity_t'] > $maxCompatibleCap) {
+                        $maxCompatibleCap = (int)$truck['capacity_t'];
+                    }
+                }
+            }
+
+            // 2. Real benötigte Fahrten berechnen
+            $trips = 1;
+            if ($maxCompatibleCap > 0 && (int)$order['weight_total'] > $maxCompatibleCap) {
+                $trips = (int)ceil((int)$order['weight_total'] / $maxCompatibleCap);
+            }
+
+            // 3. Reale gefahrene Kilometer & echten Kilometererlös ermitteln
+            $effectiveKm = $km * $trips;
+            $currentKmRate = $effectiveKm > 0 ? (float)$order['revenue'] / $effectiveKm : 0.0;
             $order['eur_per_km'] = $currentKmRate;
 
             // Marge-Ratio im Vergleich zum historischen Durchschnitt bestimmen
@@ -120,7 +151,7 @@ class OrdersViewController
 
             $ratio = $avgKmRate > 0 ? $currentKmRate / $avgKmRate : 1.0;
 
-            // Zuweisung der 5 Marge-Klassen (Kein Inline-CSS!)
+            // Zuweisung der 5 Marge-Klassen
             if ($ratio >= 1.25) {
                 $order['price_class'] = 'price-excellent'; // Tiefes Erfolgsgrün
             } elseif ($ratio >= 1.05) {
@@ -348,7 +379,7 @@ $normalizeFreight = function(string $type): string {
                     <?php echo htmlspecialchars($o['commodity']); ?> (<?php echo htmlspecialchars($o['freight_type']); ?>)
                 </td>
                 <td><?php echo $o['weight_total']; ?> t</td>
-                <td><?php echo number_format((float)$o['revenue'], 2, ',', '.'); ?> €</td>
+                <td><span class="copy-city" title="Klicken zum Kopieren"><?php echo number_format((float)$o['revenue'], 2, ',', '.'); ?> €</span></td>
                 <td><?php echo $o['km']; ?> km</td>
                 <!-- Farblich deklariertes Kilometer-Erlös Feld -->
                 <td class="<?php echo $o['price_class']; ?>">
@@ -485,6 +516,32 @@ $normalizeFreight = function(string $type): string {
 
             rows.forEach(row => tbody.appendChild(row));
         }
+
+        // --- Live-Kopieren von Frachterlösen in US-Schreibweise (PH § 1.4.5) ---
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.classList.contains('copy-city')) {
+                let textToCopy = e.target.textContent.trim();
+                
+                // Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
+                if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
+                    // Währungssymbole und Whitespaces entfernen
+                    textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
+                    // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
+                    textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
+                }
+                
+                // Native Zwischenablage-API nutzen
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    // Visuelles Erfolgs-Feedback (Flasht kurz orange)
+                    e.target.classList.add('text-orange');
+                    setTimeout(() => {
+                        e.target.classList.remove('text-orange');
+                    }, 500);
+                }).catch(err => {
+                    // Geräuschloser Fallback
+                });
+            }
+        });
     </script>
 </body>
 </html>

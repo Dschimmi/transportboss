@@ -176,6 +176,10 @@ $controller = new OrdersViewController($pdo, $distanceService);
 $historicalAverages = $controller->getHistoricalAverages();
 $rankedOrders = $controller->getProfitabilityRanking($historicalAverages);
 
+// Zeitstempel des letzten Börsen-Imports ermitteln (Datenfrische)
+$lastMarketImport = $pdo->query("SELECT MAX(last_seen_at) FROM orders WHERE is_accepted = 0 AND is_archived = 0")->fetchColumn();
+$marketImportTime = $lastMarketImport ? date('H:i', strtotime((string)$lastMarketImport)) : 'Unbekannt';
+
 // -------------------------------------------------------------
 // CHRONOLOGISCHE AUTOPILOT-BRÜCKE & LEITSTAND-DIAGNOSTIK
 // -------------------------------------------------------------
@@ -185,32 +189,41 @@ require_once 'classes/CityService.php';
 $cityServiceForPr = new CityService($pdo);
 $missingCities = $cityServiceForPr->getEmptyWarehouseCities();
 
-// B. Von aktiven LKW empfohlene Marktpool-Aufträge (DISPO-VORSCHLAG) ermitteln (NUR AUTOPILOT CHRONOLOGISCH!)
+// B. Von aktiven LKW empfohlene Marktpool-Aufträge (DISPO-VORSCHLAG) ermitteln
+// MAP-ERFASSUNG MIT ANFAHRTSDISTANZ (3SR-AMPELSYSSTEM)
+$recommendedMap = [];
 $recommendedIds = [];
-$recommendedOrderIndices = []; // Speichert die chronologische Reihenfolge für die korrekte Sortierung
 
-$activeTrucks = $pdo->query("
-    SELECT id, current_city_id, vehicle_type, capacity_t, assigned_driver_id 
-    FROM trucks 
-    WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
-")->fetchAll(PDO::FETCH_ASSOC);
+// Falls noch keine Ketten in der Session existieren: Einmalig initial berechnen
+if (empty($_SESSION['tb_suggested_chains'])) {
+    $activeTrucks = $pdo->query("
+        SELECT id, current_city_id, vehicle_type, capacity_t, assigned_driver_id 
+        FROM trucks 
+        WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
+    ")->fetchAll(PDO::FETCH_ASSOC);
 
-if (!empty($activeTrucks)) {
-    $topologyEngine = new TopologyEngine($pdo, $distanceService);
+    if (!empty($activeTrucks)) {
+        $topologyEngine = new TopologyEngine($pdo, $distanceService);
+        $_SESSION['tb_suggested_chains'] = $topologyEngine->calculateAutopilotChains();
+        $_SESSION['tb_suggested_chains_time'] = date('H:i:s');
+    }
+}
 
-    // Berechne die globalen Ketten über die einheitliche Klassen-Methode (Redundanzfrei!)
-    $suggestedChains = $topologyEngine->calculateAutopilotChains();
+$suggestedChains = $_SESSION['tb_suggested_chains'] ?? [];
 
+if (!empty($suggestedChains)) {
+    $indexCounter = 0;
     foreach ($suggestedChains as $truckId => $chain) {
         foreach ($chain as $step) {
-            // Nur Marktpool-Aufträge werden für den Leitstand ausgewertet
-            if ($step['status'] === 'market') {
+            if (isset($step['status']) && $step['status'] === 'market' && isset($step['order']['id'])) {
                 $orderId = (int)$step['order']['id'];
                 $recommendedIds[] = $orderId;
                 
-                // Chronologischen Index für dieses Auftragssegment registrieren
-                if (!isset($recommendedOrderIndices[$orderId])) {
-                    $recommendedOrderIndices[$orderId] = count($recommendedOrderIndices);
+                if (!isset($recommendedMap[$orderId])) {
+                    $recommendedMap[$orderId] = [
+                        'empty_run_dist' => (int)($step['empty_run_dist'] ?? 0),
+                        'index' => $indexCounter++
+                    ];
                 }
             }
         }
@@ -222,8 +235,8 @@ $recommendedIds = array_unique($recommendedIds);
 foreach ($rankedOrders as &$o) {
     $oId = (int)$o['id'];
     $o['is_recommended_priority'] = in_array($oId, $recommendedIds, true) ? 1 : 0;
-    // Nicht empfohlene Aufträge erhalten einen unendlich hohen Index, damit sie hinten anstehen
-    $o['recommended_index'] = $recommendedOrderIndices[$oId] ?? 999999;
+    $o['recommended_info'] = $recommendedMap[$oId] ?? null;
+    $o['recommended_index'] = $recommendedMap[$oId]['index'] ?? 999999;
     $o['is_missing_priority'] = in_array($o['from_city'], $missingCities, true) ? 1 : 0;
 }
 unset($o);
@@ -278,10 +291,14 @@ $normalizeFreight = function(string $type): string {
     <?php require_once 'nav.php'; ?>
     <div class="fluid-container">
         
-        <!-- Header mit Link zum Börsen-Import -->
+        <!-- Header mit Link zum Börsen-Import & Doppel-Zeitstempel -->
         <div class="workspace-header-row">
             <h1 class="accent-text">Börsen-Leitstand (Umsatz-Optimierung)</h1>
-            <a href="market_pool.php" class="btn-primary">+ Börsen-Import (Angebote einlesen)</a>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span class="text-gray" style="font-size:0.85em;">📦 Börsen-Import: <strong class="text-white"><?= $marketImportTime ?> Uhr</strong></span>
+                <span class="text-gray" style="font-size:0.85em;">🤖 Vorschläge: <strong class="text-orange"><?= $_SESSION['tb_suggested_chains_time'] ?? date('H:i:s') ?> Uhr</strong></span>
+                <a href="market_pool.php" class="btn-primary">+ Börsen-Import (Angebote einlesen)</a>
+            </div>
         </div>
 
         <?php if ($message): ?>
@@ -368,9 +385,14 @@ $normalizeFreight = function(string $type): string {
                 <td><?php echo htmlspecialchars($o['from_city']); ?></td>
                 <td><?php echo htmlspecialchars($o['to_city']); ?></td>
                 <td>
-                    <!-- Strategische Leitstands-Hervorhebungen (PH-konforme Badges) -->
-                    <?php if ($o['is_recommended_priority']): ?>
-                        <span class="adr-badge" title="Dieser Auftrag wird aktiv im LKW-Fahrplan des Autopiloten empfohlen!">[DISPO-VORSCHLAG]</span>
+                    <td>
+                    <!-- Strategische Leitstands-Hervorhebungen mit 3SR-Ampel -->
+                    <?php if ($o['is_recommended_priority'] && !empty($o['recommended_info'])): ?>
+                        <?php if ((int)$o['recommended_info']['empty_run_dist'] === 0): ?>
+                            <span class="radar-type-1" title="Direkte Anschlussfracht am Standort des LKW (0 km Anfahrt)!">[DISPO-VORSCHLAG: DIREKT]</span>
+                        <?php else: ?>
+                            <span class="radar-type-2" title="Anschlussfracht mit <?= $o['recommended_info']['empty_run_dist'] ?> km Anfahrt (3SR)">[DISPO-VORSCHLAG: <?= $o['recommended_info']['empty_run_dist'] ?> km Anfahrt]</span>
+                        <?php endif; ?>
                     <?php endif; ?>
                     <?php if ($o['is_missing_priority']): ?>
                         <span class="badge-missing" title="Diese Stadt hat aktuell 0 Lager-Aufträge!">[FEHLT-AUSGLEICH]</span>
