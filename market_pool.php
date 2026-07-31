@@ -16,6 +16,7 @@ declare(strict_types=1);
 require_once 'db_connect.php';
 require_once 'classes/CityService.php';
 require_once 'classes/OrderParser.php';
+require_once 'classes/DistanceService.php';
 
 use classes\OrderParser;
 
@@ -84,7 +85,9 @@ class MarketPoolController
                   AND is_archived = 0
             ");
 
+            $distanceService = new DistanceService($this->pdo);
             $importedCount = 0;
+
             foreach ($parsedOrders as $order) {
                 // 2. SCHRITT: Subtraktions-Prüfung für bereits verplante Teile (PH § 10.5)
                 // Da wir oben die unzugeordneten gelöscht haben, finden wir hier exakt die bereits verplanten Segmente!
@@ -111,13 +114,20 @@ class MarketPoolController
                 $remainingWeight = $originalWeight - $assignedWeight;
                 $remainingRevenue = max(0.0, $originalRevenue - $assignedRevenue);
 
+                // 3. SCHRITT: AUTOMATISCHE MATRIZEN-FÜTTERUNG (WEG A: Nur lernen, wenn Strecke in Matrix noch fehlt!)
+                if (!empty($order['distance_km']) && (int)$order['distance_km'] > 0) {
+                    if (!$distanceService->hasDistance((int)$order['from_city_id'], (int)$order['to_city_id'])) {
+                        $distanceService->setDistance((int)$order['from_city_id'], (int)$order['to_city_id'], (int)$order['distance_km']);
+                    }
+                }
+
                 // Falls die Tonnage bereits vollständig auf LKW verplant wurde, überspringen wir die Neuanlage des Restpostens
                 if ($remainingWeight <= 0) {
                     $importedCount++;
                     continue;
                 }
 
-                // 3. SCHRITT: Neuanlage des bereinigten Restpostens im Pool
+                // 4. SCHRITT: Neuanlage des bereinigten Restpostens im Pool
                 $stmtInsert = $this->pdo->prepare("
                     INSERT INTO orders (
                         fingerprint, freight_type, commodity, is_adr, 
