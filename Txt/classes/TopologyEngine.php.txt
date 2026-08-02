@@ -704,13 +704,18 @@ class TopologyEngine
         $radarScan = [];
         $driverHasAdr = $this->hasAdrDriverForTruck($truckId);
 
+        $hasFreeSlots = $this->hasFreeSlots();
+
         foreach ($orders as $order) {
-            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden (KORREKTUR: Statischer self:: Aufruf)
+            // Kompatibilitäts- und ADR-Prüfung
             if (!self::isTypeCompatible($order['freight_type'], $vehicleType)) continue;
 
             if ($order['is_adr'] && !$driverHasAdr) continue;
 
-            // KORREKTUR: Tonnagen-Sperren werden für das Radar nicht mehr gefiltert, sondern nur als Flag registriert!
+            // SLOT-PRÜFUNG: Marktaufträge (is_accepted = 0) nur vorschlagen, wenn freie Slots vorhanden sind!
+            if ((int)$order['is_accepted'] === 0 && !$hasFreeSlots) continue;
+
+            // Tonnagen-Sperren als Flag registrieren
             $violatesWeightLock = !$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks);
 
             $emptyRunDist = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
@@ -746,6 +751,11 @@ class TopologyEngine
             foreach ($fallbackOrders as $fallbackOrder) {
                 // Keine Duplikate einfügen
                 if (in_array($fallbackOrder['id'], $existingIds, true)) {
+                    continue;
+                }
+
+                // SLOT-PRÜFUNG AUCH FÜR FALLBACK: Marktaufträge nur aufnehmen, wenn freie Slots vorhanden sind!
+                if ((int)$fallbackOrder['is_accepted'] === 0 && !$hasFreeSlots) {
                     continue;
                 }
 

@@ -6,21 +6,24 @@ declare(strict_types=1);
  *
  * Verwaltungs-Center für die Entfernungs-Matrix (PH § 3.2.2.3 & 3.2.3.4).
  * Ermöglicht die stadtbezogene Inspektion aller Distanzen, die Identifikation
- * fehlender Verbindungen sowie die direkte Pflege von Entfernungen.
+ * fehlender Verbindungen, die direkte Manuelle Pflege sowie den Schnell-Import
+ * von Anfahrts-Distanzen aus der Ingame-Auftragsvergabe.
  *
  * @author TransportBoss Development
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once 'db_connect.php';
+require_once 'classes/CityService.php';
 require_once 'classes/DistanceService.php';
 
 $distanceService = new DistanceService($pdo);
+$cityService = new CityService($pdo);
 
 $message = '';
 $messageClass = '';
 
-// POST-Verarbeitung: Entfernung speichern oder aktualisieren
+// POST-Verarbeitung 1: Einzelne Entfernung manuell speichern
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_distance') {
     try {
         $cityA = (int)$_POST['city_a_id'];
@@ -36,6 +39,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     } catch (Exception $e) {
         $message = "Fehler beim Speichern: " . $e->getMessage();
+        $messageClass = "status-error";
+    }
+}
+
+// POST-Verarbeitung 2: Anfahrts-Matrix aus Ingame-Auftragsvergabe parsen
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'import_anfahrt_matrix') {
+    try {
+        $baseCityId = (int)$_POST['base_city_id'];
+        $rawText = trim($_POST['anfahrt_data'] ?? '');
+
+        if ($baseCityId > 0 && $rawText !== '') {
+            $lines = explode("\n", $rawText);
+            $parsedCount = 0;
+
+            foreach ($lines as $line) {
+                $row = trim($line);
+                if ($row === '') continue;
+
+                // Anfahrts-Kilometer oder VOR ORT ermitteln
+                $distKm = null;
+                if (str_contains($row, 'VOR ORT')) {
+                    $distKm = 0;
+                } elseif (preg_match('/Anfahrt:\s*(\d+)\s*km/i', $row, $matches)) {
+                    $distKm = (int)$matches[1];
+                }
+
+                if ($distKm !== null) {
+                    // Startstadt extrahieren (Text vor "Anfahrt:" bzw. "VOR ORT")
+                    if (preg_match('/(?:Deutschland|Österreich|Schweiz|Frankreich|Niederlande|Belgien|Luxemburg|Dänemark|Polen|Tschechien|Ungarn|Ukraine)\s+([A-ZÄÖÜa-zäöüß\s\.-]+?)\s+(?:Anfahrt:|VOR ORT)/u', $row, $cityMatches)) {
+                        $fromCityName = trim($cityMatches[1]);
+                        $fromCityId = $cityService->resolveId($fromCityName, true);
+
+                        if ($fromCityId && $fromCityId !== $baseCityId) {
+                            $distanceService->setDistance($baseCityId, $fromCityId, $distKm);
+                            $parsedCount++;
+                        }
+                    }
+                }
+            }
+
+            $message = "Anfahrts-Matrix erfolgreich verarbeitet! {$parsedCount} Distanzen ab der Basis-Stadt in der Matrix gespeichert.";
+            $messageClass = "status-success";
+            $_GET['city_id'] = $baseCityId; // Automatisch auf die Basis-Stadt fokussieren
+        }
+    } catch (Exception $e) {
+        $message = "Fehler beim Einlesen der Anfahrts-Matrix: " . $e->getMessage();
         $messageClass = "status-error";
     }
 }
@@ -103,6 +152,30 @@ if ($selectedCityId > 0) {
         <?php if ($message): ?>
             <div class="feedback-msg <?= $messageClass ?>"><?= htmlspecialchars($message) ?></div>
         <?php endif; ?>
+
+        <!-- SCHNELL-IMPORT: ANFAHRTS-MATRIX AUS AUFTRAGSVERGABE -->
+        <details class="form-box" style="margin-bottom: 20px;">
+            <summary class="accent-text" style="cursor: pointer; font-weight: 600;">📥 Anfahrts-Matrix aus Ingame-Auftragsvergabe einlesen (Schnell-Import)</summary>
+            <form method="post" action="matrix_admin.php?city_id=<?= $selectedCityId ?>" style="margin-top: 15px;">
+                <input type="hidden" name="action" value="import_anfahrt_matrix">
+                <div class="input-group">
+                    <label for="base_city_id">Aktueller LKW-Standort aus dem Spiel (Basis-Stadt):</label>
+                    <select id="base_city_id" name="base_city_id" class="inline-select w-100" required>
+                        <option value="">-- Basis-Stadt wählen --</option>
+                        <?php foreach ($allCities as $c): ?>
+                            <option value="<?= $c['id'] ?>" <?= $c['id'] === $selectedCityId ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($c['name']) ?> (Land: <?= htmlspecialchars($c['country_code'] ?? 'DE') ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="anfahrt_data">Kopierten Text aus der Ingame-Auftragsvergabe hier einfügen:</label>
+                    <textarea id="anfahrt_data" name="anfahrt_data" class="import-textarea" placeholder="Auftragsvergabe-Liste einkopieren..." required></textarea>
+                </div>
+                <button type="submit" class="btn-primary">Anfahrts-Distanzen parsen &amp; in Matrix speichern</button>
+            </form>
+        </details>
 
         <!-- STADTAUSWAHL-PANEL -->
         <div class="filter-panel">

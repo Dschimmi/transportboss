@@ -22,6 +22,7 @@ require_once 'classes/DriverRepository.php';
 require_once 'classes/OrderRepository.php';
 require_once 'classes/TopologyEngine.php';
 require_once 'classes/DistanceService.php';
+require_once 'classes/CityService.php';
 
 // Initialisierung der System-Services
 $truckRepo = new TruckRepository($pdo);
@@ -216,6 +217,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// "Leerfahrt beendet"-Aktion (LKW-Standort manuell auf Ankunfts-Stadt der Leerfahrt aktualisieren)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'complete_empty_run') {
+    $truckId = (int)$_POST['truck_id'];
+    $targetCityId = (int)$_POST['target_city_id'];
+
+    if ($truckId > 0 && $targetCityId > 0) {
+        $stmtUpdateTruck = $pdo->prepare("UPDATE trucks SET current_city_id = ? WHERE id = ?");
+        $stmtUpdateTruck->execute([$targetCityId, $truckId]);
+    }
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
 // Archivieren von "Geisteraufträgen"
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'archive_pool_order') {
     $orderId = (int)$_POST['order_id'];
@@ -404,17 +418,21 @@ if ($focusTruckId) {
 
 // Vorschläge basierend auf dem aktiven Planungsmodus deklarieren
 $focusSuggestions = [];
+$virtualStartCityId = 0;
+
 if ($focusTruck) {
+    // Virtuelle Startstadt des Fokus-LKW ermitteln (letzter geplanter Zielort oder physischer Standort)
+    $lastOrderCity = $pdo->query("
+        SELECT to_city_id 
+        FROM orders 
+        WHERE assigned_truck_id = " . (int)$focusTruck['id'] . " AND is_archived = 0 
+        ORDER BY assigned_at DESC LIMIT 1
+    ")->fetchColumn();
+    
+    $virtualStartCityId = $lastOrderCity ? (int)$lastOrderCity : (int)$focusTruck['current_city_id'];
+
     if ($planningMode === 'radar') {
-        // Taktisches Radar: Wir ermitteln den virtuellen Startpunkt und rufen getRadarScanForTruck auf
-        $lastOrderCity = $pdo->query("
-            SELECT to_city_id 
-            FROM orders 
-            WHERE assigned_truck_id = " . (int)$focusTruck['id'] . " AND is_archived = 0 
-            ORDER BY assigned_at DESC LIMIT 1
-        ")->fetchColumn();
-        
-        $virtualStartCityId = $lastOrderCity ? (int)$lastOrderCity : (int)$focusTruck['current_city_id'];
+        // Taktisches Radar: Wir rufen getRadarScanForTruck auf
         $focusSuggestions = $topologyEngine->getRadarScanForTruck((int)$focusTruck['id'], $virtualStartCityId);
     } else {
         // Autopilot: Wir greifen auf die im Speicher berechnete globale Kette zurück
@@ -557,6 +575,43 @@ if ($focusTruck) {
             <!-- SPALTE 3 (RECHTS): Geteilter Detail-Arbeitsbereich für den Fokus-LKW -->
             <div class="board-right-workspace">
                 <?php if ($focusTruck): ?>
+                    <?php
+                    // PROAKTIVE LAGER-MATRIX WARNUNG: Ein einziger komprimierter Hinweis bei fehlenden Anfahrts-Distanzen
+                    $hasMissingWarehouseDistance = false;
+                    $truckCurrentCityId = (int)$focusTruck['current_city_id'];
+                    $truckCurrentCityName = '';
+
+                    if ($truckCurrentCityId > 0) {
+                        $stmtWarehouseCities = $pdo->query("
+                            SELECT DISTINCT from_city_id 
+                            FROM orders 
+                            WHERE is_accepted = 1 
+                              AND assigned_truck_id IS NULL 
+                              AND is_archived = 0 
+                              AND weight_remaining > 0
+                        ");
+                        if ($stmtWarehouseCities) {
+                            $whCityIds = $stmtWarehouseCities->fetchAll(PDO::FETCH_COLUMN);
+                            foreach ($whCityIds as $whCityId) {
+                                $whCityId = (int)$whCityId;
+                                if ($whCityId !== $truckCurrentCityId) {
+                                    if (!$distanceService->hasDistance($truckCurrentCityId, $whCityId)) {
+                                        $hasMissingWarehouseDistance = true;
+                                        $truckCurrentCityName = $pdo->query("SELECT name FROM cities WHERE id = $truckCurrentCityId")->fetchColumn() ?: '';
+                                        break; // Ein einziger Treffer reicht für die Aktivierung des Hinweises!
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ?>
+
+                    <?php if ($hasMissingWarehouseDistance): ?>
+                        <div class="feedback-msg status-error" style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+                            <span>⚠️ <strong>Matrix-Lücke:</strong> Ab dem aktuellen LKW-Standort <strong><?= htmlspecialchars($truckCurrentCityName) ?></strong> können fehlende Entfernungsdaten abgegriffen werden.</span>
+                            <a href="matrix_admin.php?city_id=<?= $truckCurrentCityId ?>" class="btn-primary btn-small" style="text-decoration: none; white-space: nowrap;">Anfahrts-Matrix einlesen ➔</a>
+                        </div>
+                    <?php endif; ?>
                     
                     <!-- OBERE HÄLFTE: Geplante Tour (Fahrer & Spezifikation in der Überschrift) -->
                     <div class="detail-top-half" onclick="event.stopPropagation();">
@@ -601,12 +656,20 @@ if ($focusTruck) {
                                         $orderFromId = (int)$order['from_city_id'];
                                         $orderToId = (int)$order['to_city_id'];
 
-                                        // Leerfahrten-Berechnung (Kopierbare Städte, angepasst an 9-Spalten-Layout)
+                                        // Leerfahrten-Berechnung (Kopierbare Städte, mit Erledigt-Button)
                                         if ($orderFromId !== $currentCityId) {
                                             $emptyDistance = $distanceService->getDistance($currentCityId, $orderFromId);
                                             $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn();
                                             echo '<tr class="row-type-empty">
-                                                <td></td>
+                                                <td>
+                                                    <!-- Erledigt-Button für Leerfahrt: Setzt LKW-Standort auf Ankunfts-Stadt -->
+                                                    <form method="post" class="inline-form">
+                                                        <input type="hidden" name="action" value="complete_empty_run">
+                                                        <input type="hidden" name="target_city_id" value="' . $orderFromId . '">
+                                                        <input type="hidden" name="truck_id" value="' . $focusTruck['id'] . '">
+                                                        <button type="submit" class="btn-primary btn-complete">Erledigt</button>
+                                                    </form>
+                                                </td>
                                                 <td class="text-warning-bold">LEERFAHRT</td>
                                                 <td>-</td>
                                                 <td>-</td>
@@ -625,6 +688,13 @@ if ($focusTruck) {
                                             ? '<span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['ingame_order_id'] ?? 'LAGER') . '</span>' 
                                             : 'BÖRSE';
                                         $jobTypeColor = ((int)$order['is_accepted'] === 1) ? 'text-lager' : 'text-market';
+
+                                        // Unvollständige Matrix-Prüfung für die Zielstadt
+                                        if (!isset($cityServiceForBoard)) {
+                                            $cityServiceForBoard = new CityService($pdo);
+                                        }
+                                        $toCityIncomplete = $cityServiceForBoard->hasIncompleteMatrix($orderToId);
+                                        $incompleteBadge = $toCityIncomplete ? ' <a href="matrix_admin.php?city_id=' . $orderToId . '" style="text-decoration:none; margin-left:4px;" title="Achtung: Für diese Zielstadt fehlen noch Matrix-Verbindungen in der Datenbank! Klicken zum Nachpflegen in der Matrix-Verwaltung.">⚠️</a>' : '';
 
                                         // -------------------------------------------------------------
                                         // BERECHNUNG DER VERFÜGBAREN TONNAGE ZUM LADEZEITPUNKT (PLANNED TOUR)
@@ -687,7 +757,7 @@ if ($focusTruck) {
                                             <td class="' . $jobTypeColor . '">' . $jobTypeLabel . '</td>
                                             <td>' . htmlspecialchars($order['freight_type']) . '</td>
                                             <td>' . htmlspecialchars($order['commodity']) . '</td>
-                                            <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span></td>
+                                            <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span>' . $incompleteBadge . '</td>
                                             <td>' . $jobDistance . ' km</td>
                                             <td>' . $order['weight_remaining'] . ' t / ' . $availableAtLoading . ' t</td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
@@ -781,8 +851,16 @@ if ($focusTruck) {
                                         </td>
                                         <td><span class="copy-city" title="Klicken zum Kopieren"><?php echo number_format((float)$order['revenue'], 2, ',', '.'); ?> €</span></td>
                                         <td>
+                                            <?php 
+                                            $orderFromId = (int)$order['from_city_id'];
+                                            $hasAnfahrtDist = $distanceService->hasDistance($virtualStartCityId, $orderFromId);
+                                            $anfahrtMissingBadge = (!$hasAnfahrtDist && $virtualStartCityId !== $orderFromId) 
+                                                ? ' <a href="matrix_admin.php?city_id=' . $virtualStartCityId . '" class="badge-missing" style="text-decoration:none;" title="Achtung: Anfahrts-Distanz ab LKW-Standort fehlt in der Matrix! Hier klicken zum Nachpflegen.">⚠️ Distanz fehlt</a>' 
+                                                : '';
+                                            ?>
                                             <?php echo $suggestion['empty_run_dist']; ?> km
                                             <?php echo $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>'; ?>
+                                            <?php echo $anfahrtMissingBadge; ?>
                                         </td>
                                         <?php if ($planningMode === 'radar'): ?>
                                             <td>

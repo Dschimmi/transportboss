@@ -599,7 +599,8 @@ class TopologyEngine
         $placeholders = [];
         $params = [
             'capacity' => $capacity,
-            'has_adr' => (int)$hasAdr
+            'has_adr' => (int)$hasAdr,
+            'truck_city_id' => $currentCityId
         ];
         
         foreach ($compatibleTypes as $index => $type) {
@@ -611,40 +612,29 @@ class TopologyEngine
         $placeholdersStr = implode(',', $placeholders);
 
         $stmt = $this->pdo->prepare("
-            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name
+            SELECT o.*, c1.name AS from_city_name, c2.name AS to_city_name,
+                   COALESCE(d.distance_km, 999) AS empty_run_dist
             FROM orders o
             JOIN cities c1 ON o.from_city_id = c1.id
             JOIN cities c2 ON o.to_city_id = c2.id
+            LEFT JOIN distances d ON (
+                (d.city_a_id = :truck_city_id AND d.city_b_id = o.from_city_id) OR
+                (d.city_b_id = :truck_city_id AND d.city_a_id = o.from_city_id)
+            )
             WHERE o.is_archived = 0
-            AND o.weight_remaining > 0
-            AND o.freight_type IN ($placeholdersStr)
-            AND o.weight_total <= :capacity
-            AND (o.is_adr = 0 OR :has_adr = 1)
-            AND o.assigned_truck_id IS NULL
+              AND o.weight_remaining > 0
+              AND o.freight_type IN ($placeholdersStr)
+              AND o.weight_total <= :capacity
+              AND (o.is_adr = 0 OR :has_adr = 1)
+              AND o.assigned_truck_id IS NULL
+            ORDER BY empty_run_dist ASC, (o.revenue / NULLIF(o.weight_total, 0)) DESC
             LIMIT 20
         ");
         
         $stmt->execute($params);
         $fallbackOrders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $results = [];
-        foreach ($fallbackOrders as $fo) {
-            $distance = $this->distanceService->getDistance($currentCityId, (int)$fo['from_city_id']);
-            $fo['empty_run_dist'] = $distance;
-            $results[] = $fo;
-        }
-
-        // Sortiere streng nach der kürzesten Anfahrt (empty_run_dist ASC)
-        usort($results, function($a, $b) {
-            if ($a['empty_run_dist'] !== $b['empty_run_dist']) {
-                return $a['empty_run_dist'] <=> $b['empty_run_dist'];
-            }
-            $profitA = $a['revenue'] / max(1, (int)$a['weight_total']);
-            $profitB = $b['revenue'] / max(1, (int)$b['weight_total']);
-            return $profitB <=> $profitA;
-        });
-
-        return $results;
+        return $fallbackOrders;
     }
 
     /**
@@ -704,13 +694,18 @@ class TopologyEngine
         $radarScan = [];
         $driverHasAdr = $this->hasAdrDriverForTruck($truckId);
 
+        $hasFreeSlots = $this->hasFreeSlots();
+
         foreach ($orders as $order) {
-            // Kompatibilitäts- und ADR-Prüfung über korrekte Klassen-Methoden (KORREKTUR: Statischer self:: Aufruf)
+            // Kompatibilitäts- und ADR-Prüfung
             if (!self::isTypeCompatible($order['freight_type'], $vehicleType)) continue;
 
             if ($order['is_adr'] && !$driverHasAdr) continue;
 
-            // KORREKTUR: Tonnagen-Sperren werden für das Radar nicht mehr gefiltert, sondern nur als Flag registriert!
+            // SLOT-PRÜFUNG: Marktaufträge (is_accepted = 0) nur vorschlagen, wenn freie Slots vorhanden sind!
+            if ((int)$order['is_accepted'] === 0 && !$hasFreeSlots) continue;
+
+            // Tonnagen-Sperren als Flag registrieren
             $violatesWeightLock = !$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks);
 
             $emptyRunDist = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
@@ -746,6 +741,11 @@ class TopologyEngine
             foreach ($fallbackOrders as $fallbackOrder) {
                 // Keine Duplikate einfügen
                 if (in_array($fallbackOrder['id'], $existingIds, true)) {
+                    continue;
+                }
+
+                // SLOT-PRÜFUNG AUCH FÜR FALLBACK: Marktaufträge nur aufnehmen, wenn freie Slots vorhanden sind!
+                if ((int)$fallbackOrder['is_accepted'] === 0 && !$hasFreeSlots) {
                     continue;
                 }
 
