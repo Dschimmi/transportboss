@@ -30,6 +30,12 @@ class JobLoader
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
+        // Selbstheilende Schema-Migration: assigned_at auf Mikroskunden DATETIME(6) hochstufen
+        try {
+            $this->pdo->exec("ALTER TABLE orders MODIFY COLUMN assigned_at DATETIME(6) NULL DEFAULT NULL");
+        } catch (Exception $e) {
+            // Ignorieren falls bereits geschehen
+        }
     }
 
     /**
@@ -124,7 +130,7 @@ class JobLoader
                     ) VALUES (
                         :idn, :fingerprint, :freight_type, :commodity, :is_adr, 
                         :weight_total, :weight_remaining, :revenue, :from_city_id, :to_city_id, 
-                        :is_accepted, 0, :assigned_truck_id, NOW(), NOW()
+                        :is_accepted, 0, :assigned_truck_id, NOW(6), NOW()
                     )
                 ");
                 $stmtInsertSplit->execute([
@@ -147,7 +153,7 @@ class JobLoader
                 $stmtAssign = $this->pdo->prepare("
                     UPDATE orders 
                     SET assigned_truck_id = ?, 
-                        assigned_at = NOW(), 
+                        assigned_at = NOW(6), 
                         last_seen_at = NOW() 
                     WHERE id = ?
                 ");
@@ -171,6 +177,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
     try {
         $loader = new JobLoader($pdo);
         $loader->execute($truckId, $orderId);
+
+        // --- SCHRITT 1: AUSTRAGUNG DES GELADENEN JOBS AUS DER SESSION-KETTES DES LKW ---
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
+            foreach ($_SESSION['tb_suggested_chains'][$truckId] as $key => $step) {
+                if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
+                    unset($_SESSION['tb_suggested_chains'][$truckId][$key]);
+                    // Array-Indizes nach dem Löschen wieder fortlaufend nummerieren
+                    $_SESSION['tb_suggested_chains'][$truckId] = array_values($_SESSION['tb_suggested_chains'][$truckId]);
+                    break;
+                }
+            }
+        }
     } catch (Exception $e) {
         // KORREKTUR: Zeigt den genauen Fehlergrund an, anstatt ihn stillschweigend zu ignorieren
         die("Fataler Fehler beim Zuweisen des Auftrags: " . $e->getMessage());

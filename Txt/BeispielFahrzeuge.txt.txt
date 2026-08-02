@@ -1,0 +1,1613 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+<html>
+
+<head>
+<title>Fahrzeughandel</title>
+<link rel="stylesheet" href="/css/all.css" type="text/css">
+<script type="text/javascript" src="/js/jquery-1.5.1.min.js"></script>
+
+<script>
+var price = 0;
+var partprice = 0;
+var rate = 0;
+var creditextracosts = 0;
+
+function showpg(nr)
+{
+	$('.nppage').hide();
+	$('#'+nr).show();
+}
+
+function openPhone(fahrzeugId,neuFahrzeugTyp,neupreis,anzahlung,monatsrate,creditextracostsP,anzahlungsanteil,gesamtPreis,monatsraten)
+{
+	$('.handycontrol').show();
+	$('#selectedFahrzeugIdField').val(fahrzeugId);
+	$('#selectedNeuFahrzeugTypField').val(neuFahrzeugTyp);
+	price = neupreis;
+	partprice = anzahlung;
+	rate = monatsrate;
+	creditextracosts = creditextracostsP;
+	//gesamtPreis=price+creditextracosts;
+	
+	var varitext1Template = 'Hi, hier ist Dschimmi Transporte. Wir wollen ein Fahrzeug f&uuml;r [fahrzeugpreis] Euro kaufen, finanzieren Sie uns das alles ?';
+	var varitext2Template = 'Das w&uuml;rde sie insgesamt aber [gesamtpreis] Euro inklusive Zinsen kosten.<br>Bei [anzahlungsanteil]% Anzahlung, sind das also [anzahlung] Euro an den H&auml;ndler direkt. Soviel m&uuml;ssten sie schon selbst mitbringen.<br>'+
+					'Dazu kommen dann [monatsraten] Monatsraten zu [finanzrate] Euro.<br>'+ 
+					'Das k&ouml;nnten wir nach Pr&uuml;fung Ihrer Unterlagen sofort regeln mit elektronischer Unterschrift im Flash-Cash-Verfahren.<br>'+
+					'Wir m&uuml;ssen Sie darauf hinweisen, dass sie im Vergleich zum Barkauf durch Keditzinsen insgesamt [creditextracosts] Euro mehr zahlen.';
+
+	var varitext1 = varitext1Template.replace("\[fahrzeugpreis\]",''+price);
+	var varitext2 = varitext2Template.replace("\[anzahlung\]",''+partprice).replace("\[finanzrate\]",''+rate).replace("\[creditextracosts\]",''+creditextracosts).replace("\[gesamtpreis\]",''+(gesamtPreis)).replace("\[anzahlungsanteil\]",''+anzahlungsanteil).replace("\[monatsraten\]",''+monatsraten);
+					
+	$('#varitext1').html(varitext1);
+	$('#varitext2').html(varitext2);
+} 
+</script>
+</head>
+
+
+<body bgcolor="white" class="body">
+
+<form name="FahrzeughandelForm" method="post" action="/pages/Fahrzeughandel.shtml">
+
+
+
+<div id="screen">  
+
+	<div id="leftcol">
+		<div id="gamemenu">
+			
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+var baseminutes = 0
+var hours = 1;
+var minutes = 14+baseminutes;
+var seconds = 39;
+function updateScreen(){
+	
+	seconds+=3;
+	
+	if(seconds>=60){
+		seconds-=60;
+		minutes++;
+	}
+	if(minutes>=60){
+		minutes-=60;
+		hours++;
+	}
+	if(hours>=24){
+		hours-=24;
+		//add day
+	}
+
+	timestring=(hours<10?"0"+hours:hours)+":"+(minutes<10?"0"+minutes:minutes)+":"+(seconds<10?"0"+seconds:seconds);
+	
+	document.getElementById("digitaltime").innerHTML=timestring;
+	window.setTimeout("updateScreen()",1000);
+}
+</script>
+
+<div class="digitalclock">
+	<div class="digitalad">personal digital clockPRO</div>
+	<div class="digitalweekday">-Di.-</div>
+	<div class="digitaldate">08.05.2018</div>
+	<!-- <div class="digitaltime">01:00:00</div> -->
+	<div class="digitaltime" id="digitaltime">--:--:--</div>
+	<div class="digitaltick"></div>
+</div>
+
+
+
+<div class="buerolink">
+	<a class="menulink menulinkhover" href="/pages/Buero.shtml" title="zum B&uuml;ro"><img src="../images/menu/link-buero.jpg"></a><br/>
+	<a class="menulink" href="/pages/Buero.shtml">Buero</a><br/>
+</div>
+
+<div class="buerolink">
+	<a class="menulink menulinkhover" href="/pages/Disponent.shtml" title="zum Disponent"><img style="background-color:#ffffff" src="../images/menu/icon_disponent.jpg"></a><br/>
+	<a class="menulink" href="/pages/Disponent.shtml">Disponent</a><br/>
+</div>
+
+<div class="buerolink">
+	<a class="menulink menulinkhover" href="/pages/Auftraege.shtml" title="zum Auftragspool"><img style="background-color:#ffffff" src="../images/menu/icon_auftragspool.jpg"></a><br/>
+	<a class="menulink" href="/pages/Auftraege.shtml">Auftragspool</a><br/>
+</div>
+
+<div class="spedipda">
+	<div>
+		<div class="insidepda">
+			<a class="menulink" href="/pages/Fuhrpark.shtml" title="zum Fuhrpark">
+			<div class="spedipdascreen">
+				<div class="pdamaintopic">LKWs</div>
+				<div class="pdatopic">Zentrale: <span class="pdacontent"> 0</span></div>
+				<div class="pdatopic">Unterwegs: <span class="pdacontent"> 3</span></div>
+				<div class="pdatopic">Parkplatz: <span class="pdacontent"> 0</span></div>
+				<div style="clear:both;"></div>
+			</div>
+			</a>
+		</div>
+	</div>
+	<div>
+		<a class="menulink" href="/pages/Fuhrpark.shtml">Fuhrpark</a><br/>
+	</div>
+</div>
+
+<div class="buerolink">
+	<div>
+		<div style="float: left;width:50px;padding-left: 20px;">
+			<a class="menulink" href="/pages/ModForumView.shtml" title="Forum"><img src="../images/menu/mail.png"></a><br/>
+			<a class="menulink" href="/pages/ModForumView.shtml">Forum</a><br/>
+		</div>
+		<div style="float: left;width:50px;padding-left: 0px;">
+			<a class="menulink" href="/pages/Mails.shtml" title="Nachrichtenzentrale"><img src="../images/menu/mail.png"></a><br/>
+			<a class="menulink" href="/pages/Mails.shtml">Mails</a><br/>
+		</div>
+		<div style="clear:both;"></div>
+	</div>
+</div>
+
+<br/>
+<div class="buerolink">
+	<a class="menulink" target="_blank" href="/browsergame/transportspiel-hilfe.jsp">
+		<img style="vertical-align: middle;" src="../images/menu/icon_help.png">
+		Spielhilfe
+	</a>
+</div>
+<br>
+
+<div class="buerolink">
+	<a class="menulink" href="/login/BasicLogin.shtml?baction=logout">
+		<img style="vertical-align: middle;" src="../images/menu/icon_logout.jpg">
+		Log out
+	</a>
+</div>
+<br>
+
+<script>
+ window.setTimeout("updateScreen()");
+</script>
+
+		</div>
+	</div><!-- end div leftcol -->
+
+	<div id="centercol">
+	
+		<div id="toplogo">
+			
+
+
+ 
+ 
+ 
+
+
+
+
+
+
+
+
+
+<div class="toplogo">
+
+	<div class="logoimg">
+		<img src="/images/logooben.png" alt="TransportBoss Logo">
+	</div>
+
+	<div>
+		<div class="companyname">
+			Dschimmi Transporte (Einzelunternehmer)
+		</div>
+		<div class="tinytext standort">
+			Firmensitz: Freiburg
+		</div>
+	</div>
+	
+	
+	
+	<div class="financialstats normaltext">
+		
+		<div>
+			<div class="headerfinance">Kontostand: <span class="haben">17,245.74</span></div>
+			<div class="headerfinance">monatl.Fixkosten: <span class="haben">10,649.00</span></div>
+			<div class="headerfinance">Monatseinnahmen: <span class="haben">45,651.14</span></div>
+			<div class="headerfinance">Monatsbilanz: <span class="haben">35,002.14</span></div>
+			<div class="headerfinance" title="Transport Coins">TraCs: <span style="color:#6666cc">0</span></div>
+			<div class="headeracccount"><a href="/pages/AccountSettings.shtml">Account Optionen</a><br/></div>
+			<div style="clear:both;"></div>
+		</div>
+	</div>
+</div>
+
+		</div>
+
+		<div id="optionalbanner">
+		</div>
+
+		<div id="sysmessages" class="sysmessages">
+			
+
+			
+		</div>
+			
+		<div id="content" class="fahrzeughandel">
+
+			<div class="handycontrol">
+				<input type="hidden" name="selectedFahrzeugId" value="0" id="selectedFahrzeugIdField">
+				<input type="hidden" name="selectedNeuFahrzeugTyp" value="0" id="selectedNeuFahrzeugTypField">
+				<input type="hidden" name="neuwagenKauf" value="0">
+				
+				<div class="dialchoice">
+					<div class="dialchoicehelp">
+						Wie wollen wir das Fahrzeug finanzieren ? Wollen wir es &uuml;ber die Bank finanzieren oder es direkt beim Verk&auml;ufer bar bezahlen ? 
+					</div>
+					<div>
+						<div class="dialchoiceoption left">
+							<a href="#" onclick="jQuery('.sellerdialog').hide();jQuery('.bankdialog').show();"><img src="../images/../images/telefon-icon.png">Bank anrufen </a><br>
+						</div>
+						<div class="dialchoiceoption left">
+							<a href="#" onclick="jQuery('.bankdialog').hide();jQuery('.sellerdialog').show();"> <img src="../images/../images/telefon-icon.png">Verk&auml;ufer anrufen </a><br>
+						</div>
+						<div style="clear:both;"></div>
+					</div>
+				</div>
+				
+				<div class="dialog bankdialog">
+					<div class="tright visibledialog dialoglogo" style="padding:0">
+						<img src="../images/tel_bankscreen.jpg">
+					</div>
+
+					<div class="tleft visibledialog">Hier ist Ihre Lkw Finanzierungs-Bank, Guten Tag !</div>
+					<div class="tright visibledialog"><a href="#" onclick="jQuery('.diaA1').show()" id="varitext1">varitext1</a></div>
+					<div class="tleft hiddendialog diaA1" id="varitext2">varitext2</div>
+					<div class="tright hiddendialog diaA1">
+						<a href="#" onclick="jQuery('.diaA2').show()">Ok, klingt super, wo m&uuml;ssen wir unterschreiben ?</a><br>
+						<a href="#" onclick="jQuery('.handycontrol').hide();">&Ouml;hm... &auml;hhhh... -Auflegen-</a>
+					</div>
+					<div class="tleft hiddendialog diaA2">Hier ist ihr Vertragsformular. Unterschreiben Sie hier unten mit E-Unterschrift.</div>
+					<div class="tright hiddendialog diaA2">Alles klar !<input type="submit" name="baction" value="finanzieren"></div>
+					
+				</div>
+
+				<div class="dialog sellerdialog">
+					<div class="tright visibledialog dialoglogo" style="padding:0">
+						<img src="../images/tel_gebraucht.jpg">
+					</div>
+
+					<div class="tleft visibledialog">Sie wollen also ein Fahrzeug kaufen ?</div>
+					<div class="tright visibledialog"><a href="#" onclick="jQuery('.diaB1').show()">Ja, hier ist Dschimmi Transporte.. wir w&uuml;rden gleich alles in bar zahlen...</a></div>
+					<div class="tleft hiddendialog diaB1">Ok, super. &Uuml;berweisen sie einfach die kohle und das fahrzeug wird ihnen &uuml;bergeben..</div>
+					<div class="tright hiddendialog diaB1">
+						Alles, klar, ich &uuml;berweise ihnen den geforderten Kaufpreis jetzt sofort mittels Flash-Cash-Transfer
+						<input type="submit" name="baction" value="kaufen">
+					</div>
+				</div>
+				
+				<div style="text-align: right;"><a href="#" onclick="$('.handycontrol').hide();"><br><br>AUFLEGEN</a></div>
+			</div>
+
+			
+					<div class="zeitunginhalt">
+					
+							
+								<div class="nppage" id="page-1" style="text-align:right;display:block">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-7')">&gt;</a>&nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">1/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px">  </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Karlsruhe)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_tankwagen.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Fl&uuml;ssigkeiten 20 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">05/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>107,005 km<br></td></tr>
+														<tr><td>Zustand: </td><td>100.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 30.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 380<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(4151822,0,'202,070.00','50,517.50','5,014.00','28,948.95','25','231,018.95',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 202,070,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Frankfurt)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">09/2017</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>75,200 km<br></td></tr>
+														<tr><td>Zustand: </td><td>47.7<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10077196,0,'328,500.00','82,125.00','8,151.00','47,061.57','25','375,561.57',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 328,500,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Jena)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_plane.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Plane(Wetterschutz) 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>610,700 km<br></td></tr>
+														<tr><td>Zustand: </td><td>99.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 29.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 400<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 90 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10508177,0,'136,049.38','34,012.34','3,376.00','19,490.71','25','155,540.08',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 136,049,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Karlsbad)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schwertransport.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Schwertransport 70 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2014</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>472,012 km<br></td></tr>
+														<tr><td>Zustand: </td><td>85.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 55.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 700<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 60 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10528419,0,'252,236.88','63,059.22','6,259.00','36,135.96','25','288,372.83',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 252,237,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Bremen)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_kleintransport.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> St&uuml;ckgut 6 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">03/2011</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>455,819 km<br></td></tr>
+														<tr><td>Zustand: </td><td>100.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 8.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 75<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 125 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(218068,0,'27,784.17','6,946.04','689.00','3,980.42','25','31,764.58',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 27,784,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Dortmund)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_plane.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Plane(Wetterschutz) 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">06/2011</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>321,242 km<br></td></tr>
+														<tr><td>Zustand: </td><td>100.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 23.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 400<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 95 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(642410,0,'137,335.00','34,333.75','3,408.00','19,674.89','25','157,009.89',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 137,335,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+												<div style="clear:both;"></div>
+											</div>
+										
+					
+							
+								<div class="nppage" id="page-7" style="text-align:right;display:none">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-13')">&gt;</a>&nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">2/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-1')">&lt;</a> </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Bielefeld)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_koffer.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Kofferwagen 24 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">04/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>276,351 km<br></td></tr>
+														<tr><td>Zustand: </td><td>66.4<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 30.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 400<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 90 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(6955645,0,'182,950.62','45,737.66','4,540.00','26,209.87','25','209,160.49',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 182,951,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Bielefeld)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schuettgut.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Sch&uuml;ttgut 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">10/2016</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>92,820 km<br></td></tr>
+														<tr><td>Zustand: </td><td>65.6<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 300<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(8975971,0,'108,000.00','27,000.00','2,680.00','15,472.30','25','123,472.30',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 108,000,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Stuttgart)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2014</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>265,256 km<br></td></tr>
+														<tr><td>Zustand: </td><td>41.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(6586533,0,'339,100.21','84,775.05','8,414.00','48,580.17','25','387,680.38',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 339,100,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Dortmund)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">05/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>96,829 km<br></td></tr>
+														<tr><td>Zustand: </td><td>52.2<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(7058397,0,'359,342.50','89,835.63','8,916.00','51,480.13','25','410,822.63',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 359,342,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Berlin)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_kurier.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Kurier 2 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">04/2018</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>5,854 km<br></td></tr>
+														<tr><td>Zustand: </td><td>98.3<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 7.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 60<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 145 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10601282,0,'19,800.00','4,950.00','491.00','2,836.59','25','22,636.59',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 19,800,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Ipswich)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_kuehl.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> K&uuml;hlwaren 22 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">03/2014</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>598,880 km<br></td></tr>
+														<tr><td>Zustand: </td><td>82.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 340<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 90 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10642030,0,'185,331.67','46,332.92','4,599.00','26,550.99','25','211,882.65',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 185,332,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+												<div style="clear:both;"></div>
+											</div>
+										
+					
+							
+								<div class="nppage" id="page-13" style="text-align:right;display:none">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-19')">&gt;</a>&nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">3/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-7')">&lt;</a> </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Zwickau)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">08/2012</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>813,610 km<br></td></tr>
+														<tr><td>Zustand: </td><td>85.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 41.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10594790,0,'273,020.00','68,255.00','6,774.00','39,113.39','25','312,133.39',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 273,020,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Breda)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_isocontainer.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> ISO-Container 27 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">08/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>382,180 km<br></td></tr>
+														<tr><td>Zustand: </td><td>82.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 31.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 400<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 90 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10564317,0,'180,984.38','45,246.09','4,491.00','25,928.18','25','206,912.56',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 180,984,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Amsterdam)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_tankwagen.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Fl&uuml;ssigkeiten 20 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">08/2017</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>89,438 km<br></td></tr>
+														<tr><td>Zustand: </td><td>85.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 40.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 380<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10550694,0,'198,000.00','49,500.00','4,913.00','28,365.88','25','226,365.88',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 198,000,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Augsburg)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_plane.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Plane(Wetterschutz) 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">08/2008</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>1,424,356 km<br></td></tr>
+														<tr><td>Zustand: </td><td>41.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 28.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 400<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 95 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10544502,0,'38,115.00','9,528.75','946.00','5,460.43','25','43,575.43',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 38,115,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Trelleborg)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">07/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>382,180 km<br></td></tr>
+														<tr><td>Zustand: </td><td>96.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 41.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10503703,0,'337,594.59','84,398.65','8,377.00','48,364.48','25','385,959.06',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 337,595,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Tilburg)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_kuehl.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> K&uuml;hlwaren 22 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">02/2016</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>299,440 km<br></td></tr>
+														<tr><td>Zustand: </td><td>98.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 340<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 90 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10508904,0,'213,262.50','53,315.63','5,292.00','30,552.41','25','243,814.91',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 213,263,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+												<div style="clear:both;"></div>
+											</div>
+										
+					
+							
+								<div class="nppage" id="page-19" style="text-align:right;display:none">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-25')">&gt;</a>&nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">4/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-13')">&lt;</a> </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Augsburg)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schuettgut.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Sch&uuml;ttgut 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">01/2010</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>1,168,265 km<br></td></tr>
+														<tr><td>Zustand: </td><td>63.2<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 38.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 300<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10409395,0,'39,380.00','9,845.00','977.00','5,641.66','25','45,021.66',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 39,380,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Kosice)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_silo.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Silo 25 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2012</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>733,628 km<br></td></tr>
+														<tr><td>Zustand: </td><td>97.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 380<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10412334,0,'155,466.67','38,866.67','3,858.00','22,272.47','25','177,739.13',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 155,467,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Frankfurt)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>282,564 km<br></td></tr>
+														<tr><td>Zustand: </td><td>72.2<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(7846863,0,'351,479.79','87,869.95','8,721.00','50,353.70','25','401,833.49',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 351,480,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Freiburg)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schwertransport.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Schwertransport 70 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">06/2016</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>101,809 km<br></td></tr>
+														<tr><td>Zustand: </td><td>98.3<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 45.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 700<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 65 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(8471342,0,'256,500.00','64,125.00','6,364.00','36,746.70','25','293,246.70',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 256,500,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Bremerhaven)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">04/2014</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>537,810 km<br></td></tr>
+														<tr><td>Zustand: </td><td>81.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 41.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(10351261,0,'312,333.54','78,083.39','7,750.00','44,745.53','25','357,079.07',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 312,334,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Essen)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schwertransport.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Schwertransport 70 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>528,276 km<br></td></tr>
+														<tr><td>Zustand: </td><td>99.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 45.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 700<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 65 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(5077267,0,'241,264.38','60,316.09','5,986.00','34,564.02','25','275,828.39',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 241,264,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+												<div style="clear:both;"></div>
+											</div>
+										
+					
+							
+								<div class="nppage" id="page-25" style="text-align:right;display:none">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-31')">&gt;</a>&nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">5/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-19')">&lt;</a> </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Karlsruhe)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_tankwagen.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Fl&uuml;ssigkeiten 20 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">05/2014</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>50,107 km<br></td></tr>
+														<tr><td>Zustand: </td><td>100.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 30.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 380<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(5597999,0,'210,540.00','52,635.00','5,224.00','30,162.38','25','240,702.38',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 210,540,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Karlsruhe)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_tankwagen.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Fl&uuml;ssigkeiten 20 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">11/2012</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>194,469 km<br></td></tr>
+														<tr><td>Zustand: </td><td>100.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 30.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 380<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(3204736,0,'197,230.00','49,307.50','4,894.00','28,255.56','25','225,485.56',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 197,230,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Frankfurt)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">02/2016</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>311,349 km<br></td></tr>
+														<tr><td>Zustand: </td><td>38.3<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(8009766,0,'349,806.88','87,451.72','8,680.00','50,114.03','25','399,920.91',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 349,807,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Frankfurt)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">06/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>366,643 km<br></td></tr>
+														<tr><td>Zustand: </td><td>71.7<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(7163985,0,'336,423.54','84,105.88','8,348.00','48,196.71','25','384,620.24',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 336,424,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Dortmund)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schwertransport.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Schwertransport 70 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">06/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>193,508 km<br></td></tr>
+														<tr><td>Zustand: </td><td>77.9<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 45.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 700<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 65 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(4266188,0,'259,290.63','64,822.66','6,434.00','37,146.49','25','296,437.12',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 259,291,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Erfurt)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_plane.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Plane(Wetterschutz) 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">04/2016</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>120,772 km<br></td></tr>
+														<tr><td>Zustand: </td><td>96.3<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 23.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 400<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 95 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(8295188,0,'148,500.00','37,125.00','3,685.00','21,274.41','25','169,774.41',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 148,500,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+												<div style="clear:both;"></div>
+											</div>
+										
+					
+							
+								<div class="nppage" id="page-31" style="text-align:right;display:none">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-37')">&gt;</a>&nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">6/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-25')">&lt;</a> </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Essen)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schwertransport.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Schwertransport 70 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>543,757 km<br></td></tr>
+														<tr><td>Zustand: </td><td>96.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 45.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 700<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 65 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(5091351,0,'241,264.38','60,316.09','5,986.00','34,564.02','25','275,828.39',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 241,264,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Essen)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schwertransport.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Schwertransport 70 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">12/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>507,772 km<br></td></tr>
+														<tr><td>Zustand: </td><td>94.7<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 45.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 700<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 65 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(5083183,0,'241,264.38','60,316.09','5,986.00','34,564.02','25','275,828.39',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 241,264,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Bochum)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schuettgut.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Sch&uuml;ttgut 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">04/2017</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>37,296 km<br></td></tr>
+														<tr><td>Zustand: </td><td>96.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 300<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(9697375,0,'108,000.00','27,000.00','2,680.00','15,472.30','25','123,472.30',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 108,000,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Bochum)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_schuettgut.png" style="height:45px" title="Aerodynamik Paket: nein , Motor Tuning: nein , Stauwarner: nein">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Sch&uuml;ttgut 26 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">04/2017</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>37,600 km<br></td></tr>
+														<tr><td>Zustand: </td><td>99.2<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 300<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 80 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(9694877,0,'108,000.00','27,000.00','2,680.00','15,472.30','25','123,472.30',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 108,000,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Frankfurt)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">01/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>388,222 km<br></td></tr>
+														<tr><td>Zustand: </td><td>48.3<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(6618304,0,'331,906.66','82,976.67','8,236.00','47,549.61','25','379,456.27',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 331,907,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+							
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Stuttgart)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_gigaliner.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Superliner 44 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">02/2015</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>345,708 km<br></td></tr>
+														<tr><td>Zustand: </td><td>43.8<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 35.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 600<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(6764836,0,'336,758.13','84,189.53','8,356.00','48,244.64','25','385,002.77',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 336,758,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+												<div style="clear:both;"></div>
+											</div>
+										
+					
+							
+								<div class="nppage" id="page-37" style="text-align:right;display:none">
+							
+										
+											<div style="padding:0px 40px 4px 0px;height: 32px;">
+												<div style="float:left;line-height:32px"> <span class="zeitungtopic">der Spediteur - Ausgabe 05/2018 - Gebraucht Lkw Markt</span></div>
+												<div style="float:right;width:25px;line-height:32px"> &nbsp;</div>
+												<div style="float:right;width:40px;line-height:32px"> <span class="zeitungpage">7/7 </span></div>
+												<div style="float:right;width:25px;line-height:32px"> <a href="#" class="pagenavi" onclick="showpg('page-31')">&lt;</a> </div>
+												<div style="clear:both;"></div>
+											</div>
+										
+				
+					
+											<div class="fahrzeugoffer">
+												<div class="title">
+													Anzeige:
+													<span class="header">Gebrauchter LKW</span><br>
+													<span class="location">(Karlsruhe)</span>
+												</div>
+												<div class="vehicleimage">
+													<img src="../images/lkw_tankwagen.png" style="height:45px" title="Aerodynamik Paket: ja , Motor Tuning: ja , Stauwarner: ja">
+												</div>
+												<div class="stats">
+													<table style="width: 205px;">
+														<tr><td colspan="2" style="text-decoration:underline;">Fracht: <br><b> Fl&uuml;ssigkeiten 20 t</b><br></td></tr>
+														<tr><td>Baujahr: </td><td> <span class="bold">09/2013</span><br></td></tr>
+														<tr><td>km-Stand: </td><td>103,322 km<br></td></tr>
+														<tr><td>Zustand: </td><td>100.0<br></td></tr>
+														<tr><td>Verbr./100km:</td><td> 30.0<br></td></tr>
+														<tr><td>Tankinh.:</td><td> 380<br></td></tr>
+														<tr><td>zugel.Geschw.:</td><td> 85 km/h</td></tr>
+													</table>
+												</div>
+												<div class="price">
+													<span class="handykontakt"><a href="#" onclick="openPhone(4590023,0,'204,086.67','51,021.67','5,064.00','29,237.86','25','233,324.53',36);">(24h) <img style="border:none" src="../images/telefon-icon.png" alt="telefon"> </a> ..... </span>
+													<span> nur 204,087,- Euro</span>
+												</div>
+											</div><!--  end fahrzeugoffer -->
+										
+					
+					
+						<div style="clear:both;"></div>
+						</div>
+					
+						<div class="backtotitle">
+							<div class="left"><a href="/pages/Zeitung.shtml">Zur&uuml;ck zur Titelseite</a></div>
+							<div class="right"><a href="/pages/Buero.shtml">Zeitung weglegen und weiterarbeiten</a></div>
+							<div style="clear:both;"></div>	
+						</div>
+					</div><!--  end div zeitungsinhalt -->
+			
+
+
+		</div><!-- end div content -->
+		
+		<div id="footer">
+			<div class="footer">
+	<a class="impresslink" href="/">Home</a> - 
+	<a class="impresslink" href="/pages/impressum.jsp">Impressum</a> - 
+
+	<a class="impresslink" href="http://policy.gamedragon.de/web-transportboss.jsp" target="ds">Datenschutz</a> -
+	<a class="impresslink" href="/agb.jsp">Nutzungsbedingungen</a> - 
+	<a class="impresslink" href="http://www.gamedragon.de">www.gamedragon.de</a>
+</div>
+
+		</div>
+	</div><!-- end div centercol -->
+	
+	<div id="rightcol">
+	</div><!-- end div rightcol -->
+	
+	<div style="clear: both;"></div>
+	
+</div><!-- end divscreen -->
+ 
+
+<script>
+var gaId = "UA-7577954-15";
+var disableGa = "ga-disable-"+gaId;
+if(document.cookie.indexOf("optoutactive=true")>-1){window[disableGa]=true;}
+</script>
+<script type="text/javascript">
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-7577954-15']);
+  _gaq.push (['_gat._anonymizeIp']);
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+</script>
+
+
+
+</form>
+</body>
+
+</html>

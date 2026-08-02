@@ -94,4 +94,25 @@ class DistanceService
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result ? $result['name'] : 'Unbekannt';
     }
+
+    /**
+     * Prüft, ob für ein Städtepaar bereits ein eindeutiger Eintrag in der Matrix existiert (Europa-sicher).
+     *
+     * @param int $id1 Technische ID der ersten Stadt
+     * @param int $id2 Technische ID der zweiten Stadt
+     * @return bool True, wenn die Strecke in der Datenbank existiert
+     */
+    public function hasDistance(int $id1, int $id2): bool
+    {
+        if ($id1 === $id2) {
+            return true;
+        }
+
+        [$cityA, $cityB] = $this->normalize($id1, $id2);
+
+        $stmt = $this->pdo->prepare("SELECT 1 FROM distances WHERE city_a_id = :a AND city_b_id = :b LIMIT 1");
+        $stmt->execute(['a' => $cityA, 'b' => $cityB]);
+
+        return $stmt->fetchColumn() !== false;
+    }
 }

@@ -70,83 +70,82 @@ class OrderParser
             // Prüfen, ob die aktuelle Zeile den Beginn eines Auftrags markiert (Fracht-Header)
             if ($this->isOrderHeader($line)) {
                 try {
-                    // Block-Sicherheit prüfen: Ein vollständiger Block benötigt mindestens 7 Folgezeilen
-                    if ($i + 7 >= $lineCount) {
-                        break;
+                    // Multi-Block Toleranz: Reicht der Resttext für einen Block? Falls nein, weiterscannen statt abzubrechen
+                    if ($i + 5 >= $lineCount) {
+                        $i++;
+                        continue;
                     }
 
-                    // 1. Frachttyp bestimmen (z.B. "Silotransport Silo" -> "Silo")
+                    // 1. Frachttyp bestimmen
                     $rawFreightType = $line;
                     $freightType = $this->normalizeFreightType($rawFreightType);
 
-                    // 2. Ware, Gefahrgut-Status und Gewicht bestimmen (z.B. "(Baustoffe) 27 t" oder "(Benzin) [Gefahrgut] 46 t")
+                    // 2. Ware, Gefahrgut-Status und Gewicht bestimmen
                     $commodityLine = $cleanLines[$i + 1];
                     $isAdr = str_contains(strtolower($commodityLine), '[gefahrgut]') ? 1 : 0;
                     
-                    // Ware extrahieren (Text in runden Klammern)
                     $commodity = 'Unbekannt';
                     if (preg_match('/\(([^)]+)\)/', $commodityLine, $matches)) {
                         $commodity = trim($matches[1]);
                     }
 
-                    // Gewicht extrahieren (z.B. "27 t")
                     $weight = 0;
                     if (preg_match('/(\d+)\s*t/i', $commodityLine, $matches)) {
                         $weight = (int)$matches[1];
                     }
 
                     // 3. Start- und Zielort extrahieren
-                    $fromCityName = $cleanLines[$i + 2];
-                    $toCityName = $cleanLines[$i + 3];
+                    $fromCityName = trim($cleanLines[$i + 2]);
+                    $toCityName = trim($cleanLines[$i + 3]);
 
-                    // 4. Distanz auslesen (z.B. "292km")
+                    // 4. Distanz auslesen
                     $distanceLine = $cleanLines[$i + 4];
                     $distance = 0;
                     if (preg_match('/(\d+)\s*km/i', $distanceLine, $matches)) {
                         $distance = (int)$matches[1];
                     }
 
-                    // 5. Erlös auslesen (z.B. "Zahlung: 2,643.22" -> 3-Stufen-Geldlogik)
+                    // 5. Erlös auslesen
                     $revenueLine = $cleanLines[$i + 5];
                     $revenue = 0.00;
                     if (preg_match('/Zahlung:\s*([\d,.]+)/i', $revenueLine, $matches)) {
                         $rawRevenue = $matches[1];
-                        $cleanedRevenue = str_replace(',', '', $rawRevenue); // Tausender-Komma entfernen
+                        $cleanedRevenue = str_replace(',', '', $rawRevenue);
                         $revenue = (float)$cleanedRevenue;
                     }
 
-                    // 6. Städte in IDs auflösen (PH 3.2.1.3)
-                    $fromCityId = $this->cityService->resolveId($fromCityName, true);
-                    $toCityId = $this->cityService->resolveId($toCityName, true);
+                    // Validierung: Nur aufnehmen, wenn Start, Ziel und Gewicht plausibel sind
+                    if ($weight > 0 && $fromCityName !== '' && $toCityName !== '' && $fromCityName !== $toCityName) {
+                        $fromCityId = $this->cityService->resolveId($fromCityName, true);
+                        $toCityId = $this->cityService->resolveId($toCityName, true);
 
-                    // Fingerprint erzeugen für Dublettenschutz bei Marktdaten (PH 3.4.1.2)
-                    $fingerprintSource = $freightType . '|' . $commodity . '|' . $fromCityId . '|' . $toCityId . '|' . $weight . '|' . $revenue;
-                    $fingerprint = md5($fingerprintSource);
+                        if ($fromCityId && $toCityId) {
+                            $fingerprintSource = $freightType . '|' . $commodity . '|' . $fromCityId . '|' . $toCityId . '|' . $weight . '|' . $revenue;
+                            $fingerprint = md5($fingerprintSource);
 
-                    // Strukturiertes Auftrags-Array hinzufügen
-                    $orders[] = [
-                        'ingame_order_id' => null, // Noch keine Ingame-ID im Marktpool
-                        'fingerprint' => $fingerprint,
-                        'freight_type' => $freightType,
-                        'commodity' => $commodity,
-                        'is_adr' => $isAdr,
-                        'weight_total' => $weight,
-                        'weight_remaining' => $weight,
-                        'revenue' => $revenue,
-                        'from_city_id' => $fromCityId,
-                        'to_city_id' => $toCityId,
-                        'from_city_name' => $fromCityName,
-                        'to_city_name' => $toCityName,
-                        'is_accepted' => $isAccepted ? 1 : 0,
-                        'distance_km' => $distance
-                    ];
+                            $orders[] = [
+                                'ingame_order_id' => null,
+                                'fingerprint' => $fingerprint,
+                                'freight_type' => $freightType,
+                                'commodity' => $commodity,
+                                'is_adr' => $isAdr,
+                                'weight_total' => $weight,
+                                'weight_remaining' => $weight,
+                                'revenue' => $revenue,
+                                'from_city_id' => $fromCityId,
+                                'to_city_id' => $toCityId,
+                                'from_city_name' => $fromCityName,
+                                'to_city_name' => $toCityName,
+                                'is_accepted' => $isAccepted ? 1 : 0,
+                                'distance_km' => $distance
+                            ];
+                        }
+                    }
 
-                    // Index um die verarbeitete Blockgröße von 8 Zeilen weiterschieben
-                    $i += 8;
+                    $i += 6; // Nächsten Block im Multi-Import anspringen
                     continue;
 
                 } catch (Exception $e) {
-                    // Fehlerhafte Blöcke überspringen zur Sicherung der Import-Stabilität
                     $i++;
                     continue;
                 }

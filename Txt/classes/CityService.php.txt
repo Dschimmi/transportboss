@@ -22,30 +22,56 @@ class CityService
      */
     public function resolveId(string $name, bool $autoCreate = true): ?int
     {
-        // 1. Suche nach existierender Stadt (Normalisierung unnötig, da MySQL standardmäßig case-insensitive sucht)[cite: 3]
+        $cleanName = trim($name);
+        $countryCode = 'DE';
+
+        // Dynamische Abfrage der Präfixe aus der DB-Tabelle countries
+        $stmtCountries = $this->pdo->query("SELECT country_code, prefix_name FROM countries");
+        if ($stmtCountries) {
+            $countries = $stmtCountries->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($countries as $c) {
+                $prefixWithSpace = $c['prefix_name'] . ' ';
+                if (str_starts_with($cleanName, $prefixWithSpace)) {
+                    $countryCode = $c['country_code'];
+                    $cleanName = trim(substr($cleanName, strlen($prefixWithSpace)));
+                    break;
+                }
+            }
+        }
+
+        // 1. Suche nach existierender Stadt
         $stmt = $this->pdo->prepare("SELECT id FROM cities WHERE name = :name");
-        $stmt->execute(['name' => $name]);
+        $stmt->execute(['name' => $cleanName]);
         $id = $stmt->fetchColumn();
 
         if ($id !== false) {
             return (int)$id;
         }
 
-        // 2. Stadt existiert nicht -> Neu anlegen, falls erlaubt[cite: 3]
+        // 2. Stadt existiert nicht -> Neu anlegen mit Ländercode
         if ($autoCreate) {
-            // String-Integrität: Namen kürzer als 2 Zeichen abweisen (PH 3.2.2.4.2)[cite: 3]
-            if (mb_strlen(trim($name)) < 2) {
+            if (mb_strlen($cleanName) < 2) {
                 return null; 
             }
 
-            $stmtInsert = $this->pdo->prepare("INSERT INTO cities (name) VALUES (:name)");
-            $stmtInsert->execute(['name' => trim($name)]);
+            $stmtInsert = $this->pdo->prepare("INSERT INTO cities (name, country_code) VALUES (:name, :cc)");
+            $stmtInsert->execute(['name' => $cleanName, 'cc' => $countryCode]);
             
-            // ID-Rückgabe der Neuanlage[cite: 3]
             return (int)$this->pdo->lastInsertId();
         }
 
         return null;
+    }
+
+    /**
+     * Lädt den Ländercode einer Stadt dynamisch aus der Tabelle cities.
+     */
+    public function getCountryCode(int $cityId): string
+    {
+        $stmt = $this->pdo->prepare("SELECT country_code FROM cities WHERE id = ?");
+        $stmt->execute([$cityId]);
+        $code = $stmt->fetchColumn();
+        return $code ? (string)$code : 'DE';
     }
 
     /**
@@ -88,5 +114,32 @@ class CityService
         ");
         
         return $stmt ? array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'name') : [];
+    }
+
+    /**
+     * Prüft mathematisch exakt (K_X < N - 1), ob für eine Stadt unvollständige Matrix-Daten vorliegen.
+     *
+     * @param int $cityId Technische ID der Stadt
+     * @return bool True, wenn mindestens eine Verbindung zu allen anderen Städten in distances fehlt
+     */
+    public function hasIncompleteMatrix(int $cityId): bool
+    {
+        // 1. Gesamtzahl N aller registrierten Städte ermitteln
+        $totalCities = (int)$this->pdo->query("SELECT COUNT(*) FROM cities")->fetchColumn();
+        if ($totalCities <= 1) {
+            return false;
+        }
+
+        // 2. Anzahl K_X aller erfassten Verbindungen für diese Stadt in distances ermitteln
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) 
+            FROM distances 
+            WHERE city_a_id = :id OR city_b_id = :id
+        ");
+        $stmt->execute(['id' => $cityId]);
+        $recordedConnections = (int)$stmt->fetchColumn();
+
+        // 3. Unvollständig, wenn weniger als N - 1 Verbindungen vorliegen
+        return $recordedConnections < ($totalCities - 1);
     }
 }

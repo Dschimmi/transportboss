@@ -119,9 +119,13 @@ class WarehouseParser
                 $fromCityId = $this->cityService->resolveId($fromCityName, true);
                 $toCityId = $this->cityService->resolveId($toCityName, true);
 
+                // Fingerprint erzeugen für Heirat von gesplitteten Teilladungen (PH 3.4.1.2)
+                $fingerprintSource = $freightType . '|' . $commodity . '|' . $fromCityId . '|' . $toCityId . '|' . $weightTotal . '|' . $revenue;
+                $fingerprint = md5($fingerprintSource);
+
                 $orders[] = [
                     'ingame_order_id' => $ingameId,
-                    'fingerprint' => null, // Identifikation erfolgt über die IDN
+                    'fingerprint' => $fingerprint,
                     'freight_type' => $freightType,
                     'commodity' => $commodity,
                     'is_adr' => $isAdr,
