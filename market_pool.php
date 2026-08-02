@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+// CORS-Header für 1-Klick-Bookmarklet Importe aus dem Spiel-Tab freischalten
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
+
 /**
  * market_pool.php
  *
