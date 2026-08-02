@@ -759,7 +759,7 @@ if ($focusTruck) {
                                             <td>' . htmlspecialchars($order['commodity']) . '</td>
                                             <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span>' . $incompleteBadge . '</td>
                                             <td>' . $jobDistance . ' km</td>
-                                            <td>' . $order['weight_remaining'] . ' t / ' . $availableAtLoading . ' t</td>
+                                            <td><span title="L = ' . $order['weight_remaining'] . 't (Geladen) | A = ' . $availableAtLoading . 't (Verfügbar beim Laden) | U = ' . (int)$order['weight_total'] . 't (Ursprünglich gesamt)"><strong>' . $order['weight_remaining'] . '</strong> / ' . $availableAtLoading . ' / ' . (int)$order['weight_total'] . ' t</span></td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
                                                 <!-- Entladen-Button ganz rechts -->
@@ -796,15 +796,18 @@ if ($focusTruck) {
                             <table class="suggestion-table workspace-table">
                             <thead>
                                 <tr>
-                                    <th>Erledigt?</th>
-                                    <th>Status</th>
-                                    <th>Typ</th>
-                                    <th>Art</th>
+                                    <th>Laden</th>
+                                    <th>IDN / Pool</th>
                                     <th>Route</th>
-                                    <th>Distanz</th>
+                                    <th>Frachttyp</th>
                                     <th>Tonnage</th>
                                     <th>Erlös</th>
-                                    <th>Aktionen</th>
+                                    <th>Distanz</th>
+                                    <?php if ($planningMode === 'radar'): ?>
+                                        <th>Ketten-Radar</th>
+                                    <?php endif; ?>
+                                    <th>Status</th>
+                                    <th>Aktion</th>
                                 </tr>
                             </thead>
                                 <tbody>
@@ -843,8 +846,8 @@ if ($focusTruck) {
                                             ➔ <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['to_city_name']); ?></span>
                                         </td>
                                         <td><?php echo htmlspecialchars($order['freight_type']); ?></td>
-                                        <td class="<?php echo !empty($suggestion['violates_weight_lock']) ? 'text-warning-bold' : ''; ?>">
-                                            <?php echo $suggestion['loaded_weight']; ?> t / <?php echo $suggestion['available_weight']; ?> t
+                                        <td class="<?php echo !empty($suggestion['violates_weight_lock']) ? 'text-warning-bold' : ''; ?>" title="L = <?= $suggestion['loaded_weight'] ?>t (Geladen) | A = <?= $suggestion['available_weight'] ?>t (Aktuell verfügbar) | U = <?= (int)($order['weight_total'] ?? $suggestion['available_weight']) ?>t (Ursprünglich gesamt)">
+                                            <strong><?= $suggestion['loaded_weight'] ?></strong> / <?= $suggestion['available_weight'] ?> / <?= (int)($order['weight_total'] ?? $suggestion['available_weight']) ?> t
                                             <?php if (!empty($suggestion['violates_weight_lock'])): ?>
                                                 <br><small class="text-warning-bold">[Tonnage-Sperre]</small>
                                             <?php endif; ?>
