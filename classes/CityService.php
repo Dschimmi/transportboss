@@ -22,7 +22,11 @@ class CityService
      */
     public function resolveId(string $name, bool $autoCreate = true): ?int
     {
-        $cleanName = trim($name);
+        // 0. BEREINIGUNG: Tabulatoren, Zeilenumbrüche & UTF-8 Codierungsfehler abfangen
+        $cleanName = trim(explode("\t", $name)[0]);
+        $cleanName = str_replace(["\r", "\n", "\t"], '', $cleanName);
+        $cleanName = mb_convert_encoding($cleanName, 'UTF-8', 'UTF-8, ISO-8859-1, WINDOWS-1252');
+
         $countryCode = 'DE';
 
         // Dynamische Abfrage der Präfixe aus der DB-Tabelle countries

@@ -87,6 +87,13 @@ class OrderParser
                     $commodity = 'Unbekannt';
                     if (preg_match('/\(([^)]+)\)/', $commodityLine, $matches)) {
                         $commodity = trim($matches[1]);
+                        
+                        // Genereller Umlaut-Heilungs-Filter für Ingame-Warennamen
+                        $commodity = str_replace(
+                            ['Laborzube?r', 'Gartenger?te', 'M?bel', 'St?ckwaren', 'St?ckgut', 'Fl?ssigkeiten', 'K?hlwaren', 'Sch?ttgut'],
+                            ['Laborzubehör', 'Gartengeräte', 'Möbel', 'Stückwaren', 'Stückgut', 'Flüssigkeiten', 'Kühlwaren', 'Schüttgut'],
+                            $commodity
+                        );
                     }
 
                     $weight = 0;

@@ -367,11 +367,13 @@ $normalizeFreight = function(string $type): string {
                 <tr>
                     <th onclick="sortTable(0, 'string')">Von ⇕</th>
                     <th onclick="sortTable(1, 'string')">Nach ⇕</th>
-                    <th onclick="sortTable(2, 'string')">Ware (Typ) ⇕</th>
-                    <th onclick="sortTable(3, 'number')">Gewicht ⇕</th>
-                    <th onclick="sortTable(4, 'number')">Umsatz ⇕</th>
-                    <th onclick="sortTable(5, 'number')">Distanz ⇕</th>
-                    <th onclick="sortTable(6, 'number')">€ / km ⇕</th>
+                    <th onclick="sortTable(2, 'string')">Leitstand / Status ⇕</th>
+                    <th onclick="sortTable(3, 'string')">Ware ⇕</th>
+                    <th onclick="sortTable(4, 'string')">Frachttyp ⇕</th>
+                    <th onclick="sortTable(5, 'number')">Gewicht ⇕</th>
+                    <th onclick="sortTable(6, 'number')">Umsatz ⇕</th>
+                    <th onclick="sortTable(7, 'number')">Distanz ⇕</th>
+                    <th onclick="sortTable(8, 'number')">€ / km ⇕</th>
                 </tr>
             </thead>
             <tbody>
@@ -381,12 +383,10 @@ $normalizeFreight = function(string $type): string {
                 data-to="<?php echo htmlspecialchars($o['to_city']); ?>" 
                 data-freight-type="<?php echo htmlspecialchars($normalizeFreight($o['freight_type'])); ?>"
                 data-weight="<?php echo $o['weight_total']; ?>"
-                data-eur-per-km="<?php echo $o['eur_per_km']; ?>"> <!-- KORREKTUR: Filter-Attribut hinzugefügt! -->
+                data-eur-per-km="<?php echo $o['eur_per_km']; ?>">
                 <td><?php echo htmlspecialchars($o['from_city']); ?></td>
                 <td><?php echo htmlspecialchars($o['to_city']); ?></td>
                 <td>
-                    <td>
-                    <!-- Strategische Leitstands-Hervorhebungen mit 3SR-Ampel -->
                     <?php if ($o['is_recommended_priority'] && !empty($o['recommended_info'])): ?>
                         <?php if ((int)$o['recommended_info']['empty_run_dist'] === 0): ?>
                             <span class="radar-type-1" title="Direkte Anschlussfracht am Standort des LKW (0 km Anfahrt)!">[DISPO-VORSCHLAG: DIREKT]</span>
@@ -398,12 +398,15 @@ $normalizeFreight = function(string $type): string {
                         <span class="badge-missing" title="Diese Stadt hat aktuell 0 Lager-Aufträge!">[FEHLT-AUSGLEICH]</span>
                     <?php endif; ?>
                     <?php echo $o['is_adr'] ? '<span class="adr-badge">[ADR]</span>' : ''; ?>
-                    <?php echo htmlspecialchars($o['commodity']); ?> (<?php echo htmlspecialchars($o['freight_type']); ?>)
+                    <?php if (!$o['is_recommended_priority'] && !$o['is_missing_priority'] && !$o['is_adr']): ?>
+                        <span class="text-gray">-</span>
+                    <?php endif; ?>
                 </td>
+                <td><strong><?php echo htmlspecialchars($o['commodity']); ?></strong></td>
+                <td><?php echo htmlspecialchars($o['freight_type']); ?></td>
                 <td><?php echo $o['weight_total']; ?> t</td>
                 <td><span class="copy-city" title="Klicken zum Kopieren"><?php echo number_format((float)$o['revenue'], 2, ',', '.'); ?> €</span></td>
                 <td><?php echo $o['km']; ?> km</td>
-                <!-- Farblich deklariertes Kilometer-Erlös Feld -->
                 <td class="<?php echo $o['price_class']; ?>">
                     <strong><?php echo number_format($o['eur_per_km'], 2, ',', '.'); ?> €</strong>
                 </td>
@@ -509,7 +512,7 @@ $normalizeFreight = function(string $type): string {
         });
 
         // --- Sortier-Logik ---
-        let sortDirections = [false, false, false, false, false, false, true]; 
+        let sortDirections = [false, false, false, false, false, false, false, false, true];
 
         function sortTable(columnIndex, type) {
             let table = document.getElementById("sortableTable");

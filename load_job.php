@@ -139,7 +139,7 @@ class JobLoader
                     'freight_type' => $order['freight_type'],
                     'commodity' => $order['commodity'],
                     'is_adr' => $order['is_adr'],
-                    'weight_total' => $loadedWeight,
+                    'weight_total' => $weightTotal, // changed from 'weight_total' => $loadedWeight,
                     'weight_remaining' => $loadedWeight,
                     'revenue' => $proportionalRevenue,
                     'from_city_id' => $order['from_city_id'],

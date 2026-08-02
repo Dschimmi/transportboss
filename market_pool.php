@@ -56,6 +56,11 @@ class MarketPoolController
      */
     public function import(string $rawData): array
     {
+        // 0. ISO-8859-1 / Windows-1252 Ingame-Codierungen automatisch in echtes UTF-8 umwandeln
+        if (!mb_check_encoding($rawData, 'UTF-8')) {
+            $rawData = mb_convert_encoding($rawData, 'UTF-8', 'ISO-8859-1, WINDOWS-1252, CP1252');
+        }
+
         $rawData = trim($rawData);
         if ($rawData === '') {
             return [

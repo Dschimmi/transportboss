@@ -710,9 +710,9 @@ if ($focusTruck) {
                                             $params['fingerprint'] = $order['fingerprint'];
                                         }
 
-                                        // Summe aller Segmente, die nach diesem geladen wurden (oder zeitgleich bei höherer technischer ID)
+                                        // Summe aller Segmente, die nach diesem geladen wurden (berechnet auf weight_remaining!)
                                         $stmtSum = $pdo->prepare("
-                                            SELECT COALESCE(SUM(weight_total), 0) 
+                                            SELECT COALESCE(SUM(weight_remaining), 0) 
                                             FROM orders 
                                             WHERE $baseIdCond 
                                               AND is_archived = 0 
@@ -741,8 +741,8 @@ if ($focusTruck) {
                                         $stmtUnassigned->execute($unassignedParams);
                                         $unassignedSum = (int)$stmtUnassigned->fetchColumn();
 
-                                        // Tonnage zum Ladezeitpunkt = Eigene Menge + Später geladene Mengen + Unverplante Restmengen
-                                        $availableAtLoading = (int)$order['weight_total'] + $futureLoadedSum + $unassignedSum;
+                                        // Aktuell unverplante Restmenge im Lager (A)
+                                        $currentWarehouseRest = $unassignedSum;
 
                                         echo '<tr class="row-type-cargo">
                                             <td>
@@ -759,7 +759,7 @@ if ($focusTruck) {
                                             <td>' . htmlspecialchars($order['commodity']) . '</td>
                                             <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span>' . $incompleteBadge . '</td>
                                             <td>' . $jobDistance . ' km</td>
-                                            <td><span title="L = ' . $order['weight_remaining'] . 't (Geladen) | A = ' . $availableAtLoading . 't (Verfügbar beim Laden) | U = ' . (int)$order['weight_total'] . 't (Ursprünglich gesamt)"><strong>' . $order['weight_remaining'] . '</strong> / ' . $availableAtLoading . ' / ' . (int)$order['weight_total'] . ' t</span></td>
+                                            <td><span title="L = ' . $order['weight_remaining'] . 't (Geladen) | A = ' . $currentWarehouseRest . 't (Verfügbar beim Laden) | U = ' . (int)$order['weight_total'] . 't (Ursprünglich gesamt)"><strong>' . $order['weight_remaining'] . '</strong> / ' . $currentWarehouseRest . ' / ' . (int)$order['weight_total'] . ' t</span></td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
                                                 <!-- Entladen-Button ganz rechts -->
