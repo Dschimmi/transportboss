@@ -133,6 +133,7 @@ class OrderRepository
                 'is_adr'            => $orderData->isAdr(),
                 'weight_total'      => $orderData->getWeightTotal(),
                 'weight_remaining'  => $orderData->getWeightRemaining(),
+                'weight_loaded'     => $orderData->getWeightLoaded(),
                 'revenue'           => $orderData->getRevenue(),
                 'from_city_id'      => $orderData->getFromCityId(),
                 'to_city_id'        => $orderData->getToCityId(),
@@ -145,11 +146,11 @@ class OrderRepository
 
         $stmt = $this->pdo->prepare("
             INSERT INTO orders (
-                ingame_order_id, freight_type, commodity, is_adr, weight_total, weight_remaining,
+                ingame_order_id, freight_type, commodity, is_adr, weight_total, weight_remaining, weight_loaded,
                 revenue, from_city_id, to_city_id, is_accepted, is_archived, assigned_truck_id,
                 assigned_at, last_seen_at
             ) VALUES (
-                :ingame_order_id, :freight_type, :commodity, :is_adr, :weight_total, :weight_remaining,
+                :ingame_order_id, :freight_type, :commodity, :is_adr, :weight_total, :weight_remaining, :weight_loaded,
                 :revenue, :from_city_id, :to_city_id, :is_accepted, :is_archived, :assigned_truck_id,
                 COALESCE(:assigned_at, NOW(6)), :last_seen_at
             ) ON DUPLICATE KEY UPDATE
@@ -165,6 +166,7 @@ class OrderRepository
             'is_adr' => (int)($orderData['is_adr'] ?? false),
             'weight_total' => (int)($orderData['weight_total'] ?? 0),
             'weight_remaining' => (int)($orderData['weight_remaining'] ?? 0),
+            'weight_loaded' => isset($orderData['weight_loaded']) ? (int)$orderData['weight_loaded'] : null,
             'revenue' => (float)($orderData['revenue'] ?? 0),
             'from_city_id' => (int)($orderData['from_city_id'] ?? 0),
             'to_city_id' => (int)($orderData['to_city_id'] ?? 0),

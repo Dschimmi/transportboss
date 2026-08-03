@@ -14,6 +14,7 @@ class Order
         private bool $isAdr,
         private int $weightTotal,
         private int $weightRemaining,
+        private ?int $weightLoaded = null,
         private float $revenue,
         private int $fromCityId,
         private int $toCityId,
@@ -32,6 +33,7 @@ class Order
     public function isAdr(): bool { return $this->isAdr; }
     public function getWeightTotal(): int { return $this->weightTotal; }
     public function getWeightRemaining(): int { return $this->weightRemaining; }
+    public function getWeightLoaded(): ?int { return $this->weightLoaded; }
     public function getRevenue(): float { return $this->revenue; }
     public function getFromCityId(): int { return $this->fromCityId; }
     public function getToCityId(): int { return $this->toCityId; }

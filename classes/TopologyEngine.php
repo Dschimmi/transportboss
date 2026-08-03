@@ -20,6 +20,11 @@ class TopologyEngine
         $this->distanceService = $distanceService;
     }
 
+    public static function calculateLoadedWeight(int $weightRemaining, int $capacity): int
+    {
+        return min($weightRemaining, $capacity);
+    }
+
     /**
      * Prüft, ob ein Auftrag (Restmenge) durch die Tonnagen-Restriktionen (Min/Max) eines LKW erlaubt ist.
      * Falls die Restriktion verletzt wird, prüft das System über die "Typen-Sicherheits-Weiche" (PH § Exception),
@@ -257,7 +262,7 @@ class TopologyEngine
                 $poolIndex = $bestCandidate['pool_index'];
                 $orderToLoad = &$virtualOrderPool[$poolIndex];
 
-                $loadedWeight = min($orderToLoad['weight_remaining'], (int)$t['capacity_t']);
+                $loadedWeight = self::calculateLoadedWeight((int)$orderToLoad['weight_remaining'], (int)$t['capacity_t']);
                 $isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
                 $availableWeight = (int)$orderToLoad['weight_remaining'];
 
@@ -354,7 +359,7 @@ class TopologyEngine
             $routeDistance = $this->distanceService->getDistance($order['from_city_id'], $order['to_city_id']);
             
             // KORREKTUR: Berechnet die proportionale Kilometer-Marge des LKW für diese Fahrt
-            $loadedWeight = min((int)$order['weight_remaining'], (int)$truck['capacity_t']);
+            $loadedWeight = self::calculateLoadedWeight((int)$order['weight_remaining'], (int)$truck['capacity_t']);
             $proportionalRevenue = ($order['revenue'] / $order['weight_total']) * $loadedWeight;
             $tripYield = $proportionalRevenue / max(1, $routeDistance);
 
@@ -709,7 +714,7 @@ class TopologyEngine
             $violatesWeightLock = !$this->isOrderAllowedByWeight($order, $truck, $allOwnedTrucks);
 
             $emptyRunDist = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
-            $loadedWeight = min((int)$order['weight_remaining'], $capacity);
+            $loadedWeight = self::calculateLoadedWeight((int)$order['weight_remaining'], $capacity);
             $isSplit = (int)$order['weight_remaining'] > $capacity;
 
             // Simuliere die vorausschauende Kette (Radar-Stufe)
@@ -755,7 +760,7 @@ class TopologyEngine
                 $distanceToOrder = $fallbackOrder['empty_run_dist'];
                 $routeDistance = $this->distanceService->getDistance((int)$fallbackOrder['from_city_id'], (int)$fallbackOrder['to_city_id']);
                 
-                $loadedWeight = min((int)$fallbackOrder['weight_remaining'], $capacity);
+                $loadedWeight = self::calculateLoadedWeight((int)$fallbackOrder['weight_remaining'], $capacity);
                 $isSplit = (int)$fallbackOrder['weight_remaining'] > $capacity;
 
                 $radarScan[] = [

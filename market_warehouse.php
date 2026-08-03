@@ -95,7 +95,7 @@ class WarehouseSynchronizer
                 $this->propagateMarriageToClones($existingId, $order['ingame_order_id']);
 
                 $stmtClonesWeight = $this->pdo->prepare("
-                    SELECT COALESCE(SUM(weight_total), 0) 
+                    SELECT COALESCE(SUM(weight_loaded), 0) 
                     FROM orders 
                     WHERE ingame_order_id LIKE ? 
                       AND assigned_truck_id IS NOT NULL 

@@ -759,7 +759,7 @@ if ($focusTruck) {
                                             <td>' . htmlspecialchars($order['commodity']) . '</td>
                                             <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['from_city_name']) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars($order['to_city_name']) . '</span>' . $incompleteBadge . '</td>
                                             <td>' . $jobDistance . ' km</td>
-                                            <td><span title="L = ' . $order['weight_remaining'] . 't (Geladen) | A = ' . $currentWarehouseRest . 't (Verfügbar beim Laden) | U = ' . (int)$order['weight_total'] . 't (Ursprünglich gesamt)"><strong>' . $order['weight_remaining'] . '</strong> / ' . $currentWarehouseRest . ' / ' . (int)$order['weight_total'] . ' t</span></td>
+                                            <td><span title="L = ' . ($order['weight_loaded'] ?? $order['weight_remaining']) . 't (Geladen) | A = ' . $currentWarehouseRest . 't (Verfügbar beim Laden) | U = ' . (int)$order['weight_total'] . 't (Ursprünglich gesamt)"><strong>' . ($order['weight_loaded'] ?? $order['weight_remaining']) . '</strong> / ' . $currentWarehouseRest . ' / ' . (int)$order['weight_total'] . ' t</span></td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
                                                 <!-- Entladen-Button ganz rechts -->

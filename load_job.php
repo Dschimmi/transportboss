@@ -125,11 +125,11 @@ class JobLoader
                 $stmtInsertSplit = $this->pdo->prepare("
                     INSERT INTO orders (
                         ingame_order_id, fingerprint, freight_type, commodity, is_adr, 
-                        weight_total, weight_remaining, revenue, from_city_id, to_city_id, 
+                        weight_total, weight_remaining, weight_loaded, revenue, from_city_id, to_city_id, 
                         is_accepted, is_archived, assigned_truck_id, assigned_at, last_seen_at
                     ) VALUES (
                         :idn, :fingerprint, :freight_type, :commodity, :is_adr, 
-                        :weight_total, :weight_remaining, :revenue, :from_city_id, :to_city_id, 
+                        :weight_total, 0, :weight_loaded, :revenue, :from_city_id, :to_city_id, 
                         :is_accepted, 0, :assigned_truck_id, NOW(6), NOW()
                     )
                 ");
@@ -139,8 +139,8 @@ class JobLoader
                     'freight_type' => $order['freight_type'],
                     'commodity' => $order['commodity'],
                     'is_adr' => $order['is_adr'],
-                    'weight_total' => $weightTotal, // changed from 'weight_total' => $loadedWeight,
-                    'weight_remaining' => $loadedWeight,
+                    'weight_total' => $weightTotal,
+                    'weight_loaded' => $loadedWeight,
                     'revenue' => $proportionalRevenue,
                     'from_city_id' => $order['from_city_id'],
                     'to_city_id' => $order['to_city_id'],
@@ -154,7 +154,9 @@ class JobLoader
                     UPDATE orders 
                     SET assigned_truck_id = ?, 
                         assigned_at = NOW(6), 
-                        last_seen_at = NOW() 
+                        last_seen_at = NOW(),
+                        weight_loaded = weight_remaining,
+                        weight_remaining = 0
                     WHERE id = ?
                 ");
                 $stmtAssign->execute([$truckId, $orderId]);

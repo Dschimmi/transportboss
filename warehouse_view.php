@@ -49,7 +49,7 @@ class WarehouseViewController
         $stmt = $this->pdo->query("
             SELECT 
                 o.ingame_order_id, o.freight_type, o.commodity, o.is_adr, 
-                o.weight_total, o.weight_remaining, o.revenue,
+                o.weight_total, o.weight_remaining, o.weight_loaded, o.revenue,
                 c1.name AS from_city, c1.id AS from_id,
                 c2.name AS to_city, c2.id AS to_id
             FROM orders o
@@ -109,7 +109,7 @@ $rankedOrders = $controller->getRankedWarehouseOrders();
                     <th onclick="sortTable(1, 'string')">Von ⇕</th>
                     <th onclick="sortTable(2, 'string')">Nach ⇕</th>
                     <th onclick="sortTable(3, 'string')">Ware (Typ) ⇕</th>
-                    <th onclick="sortTable(4, 'number')">Gewicht (Rest/Gesamt) ⇕</th>
+                    <th onclick="sortTable(4, 'number')">Gewicht (Geladen/Rest/Gesamt) ⇕</th>
                     <th onclick="sortTable(5, 'number')">Umsatz ⇕</th>
                     <th onclick="sortTable(6, 'number')">Distanz ⇕</th>
                     <th class="accent-text" onclick="sortTable(7, 'number')">€ / km ⇕</th>
@@ -125,7 +125,7 @@ $rankedOrders = $controller->getRankedWarehouseOrders();
                     <?= $o['is_adr'] ? '<span class="adr-badge">[ADR]</span>' : '' ?>
                     <?= htmlspecialchars($o['commodity']) ?> (<?= htmlspecialchars($o['freight_type']) ?>)
                 </td>
-                <td><?= $o['weight_remaining'] ?> / <?= $o['weight_total'] ?> t</td>
+                <td><?= ($o['weight_loaded'] ?? 0) ?> / <?= $o['weight_remaining'] ?> / <?= $o['weight_total'] ?> t</td>
                 <td><?= number_format((float)$o['revenue'], 2, ',', '.') ?> €</td>
                 <td><?= $o['km'] ?> km</td>
                 <td class="accent-text"><strong><?= number_format($o['eur_per_km'], 2, ',', '.') ?> €</strong></td>
