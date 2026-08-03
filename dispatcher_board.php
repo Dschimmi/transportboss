@@ -118,12 +118,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if ($info && $info['assigned_truck_id'] && $info['assigned_at']) {
         $truckId = (int)$info['assigned_truck_id'];
         $assignedAt = $info['assigned_at'];
+        $truckInfo = $truckRepo->getById($truckId);
+        if ($truckInfo === null) {
+            throw new RuntimeException("Truck $truckId nicht gefunden.");
+        }
 
         // 2. MINIMALINVASIVE SCHNITTSTELLE:
         // Wir laden alle betroffenen Folge-Aufträge dieser Tour chronologisch, um verplante
         // Split-Klone sauber zu löschen und ihre Tonnagen sicher zurückzuerstatten!
         $stmtAffected = $pdo->prepare("
-            SELECT id, ingame_order_id, weight_total 
+            SELECT id, ingame_order_id, weight_total, weight_loaded, weight_remaining, fingerprint, freight_type, commodity, is_adr, from_city_id, to_city_id, is_accepted 
             FROM orders 
             WHERE assigned_truck_id = ? 
               AND is_archived = 0 
@@ -135,38 +139,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $pdo->beginTransaction();
         try {
             foreach ($affectedOrders as $ord) {
-                $oId = (int)$ord['id'];
-                $idn = $ord['ingame_order_id'];
+                    $oId = (int)$ord['id'];
+                    $idn = $ord['ingame_order_id'];
+                    $loadedWeight = (int)($ord['weight_loaded'] ?? $ord['weight_remaining']);
 
-                // Prüfen, ob es sich um einen Split-Klon handelt (IDN enthält einen Bindestrich, z.B. IDN10700463-6)
-                if ($idn !== null && str_contains($idn, '-')) {
-                    $baseIdn = explode('-', $idn)[0];
-                    $loadedWeight = (int)$ord['weight_total'];
+                    // DB-Check: Existiert ein unverplanter Mutter-Auftrag im Lager/Pool?
+                    if ($idn !== null && str_contains($idn, '-')) {
+                        $motherStmt = $pdo->prepare("SELECT id FROM orders WHERE ingame_order_id = ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
+                        $motherStmt->execute([explode('-', $idn)[0]]);
+                    } else {
+                        $motherStmt = $pdo->prepare("SELECT id FROM orders WHERE fingerprint = ? AND id != ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
+                        $motherStmt->execute([$ord['fingerprint'], $oId]);
+                    }
+                    $motherId = $motherStmt->fetchColumn();
 
-                    // A. Tonnage zurück in den unplanbaren Pool-Hauptauftrag überführen
-                    $stmtMergeBack = $pdo->prepare("
-                        UPDATE orders 
-                        SET weight_remaining = weight_remaining + ? 
-                        WHERE ingame_order_id = ? 
-                          AND is_archived = 0
-                    ");
-                    $stmtMergeBack->execute([$loadedWeight, $baseIdn]);
+                    if ($motherId !== false) {
+                        // A. Klon: Tonnage auf Mutter-Auftrag buchen und Klon löschen
+                        $stmtRefund = $pdo->prepare("UPDATE orders SET weight_remaining = weight_remaining + ? WHERE id = ?");
+                        $stmtRefund->execute([$loadedWeight, (int)$motherId]);
 
-                    // B. Den verwaisten Klon-Eintrag vollständig löschen (Vermeidung von Datenmüll)
-                    $stmtDeleteClone = $pdo->prepare("DELETE FROM orders WHERE id = ?");
-                    $stmtDeleteClone->execute([$oId]);
-                } else {
-                    // C. Normaler, vollständiger Auftrag: Einfach vom LKW entkoppeln
-                    $stmtUnassign = $pdo->prepare("
-                        UPDATE orders 
-                        SET assigned_truck_id = NULL, 
-                            assigned_at = NULL 
-                        WHERE id = ?
-                    ");
-                    $stmtUnassign->execute([$oId]);
+                        $stmtDelete = $pdo->prepare("DELETE FROM orders WHERE id = ?");
+                        $stmtDelete->execute([$oId]);
+                    } else {
+                        // B. Ungeteilter Komplettauftrag: Zurück ins Lager/Pool stellen
+                        $stmtUnassign = $pdo->prepare("
+                            UPDATE orders 
+                            SET assigned_truck_id = NULL, 
+                                assigned_at = NULL, 
+                                weight_loaded = NULL, 
+                                weight_remaining = weight_total 
+                            WHERE id = ?
+                        ");
+                        $stmtUnassign->execute([$oId]);
+                    }
+
+                    // D. Den entladenen Schritt exklusiv in die Vorschlagskette dieses LKWs zurückschreiben
+                    if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
+                        $targetOrderId = ($motherId !== false) ? (int)$motherId : $oId;
+                        $pStmt = $pdo->prepare("SELECT o.id, o.weight_remaining, o.weight_total, o.ingame_order_id, o.fingerprint, o.freight_type, o.commodity, o.is_adr, o.revenue, o.from_city_id, o.to_city_id, o.is_accepted, c1.name AS from_city_name, c2.name AS to_city_name FROM orders o JOIN cities c1 ON o.from_city_id = c1.id JOIN cities c2 ON o.to_city_id = c2.id WHERE o.id = ?");
+                        $pStmt->execute([$targetOrderId]);
+                        $pObj = $pStmt->fetch(PDO::FETCH_ASSOC);
+
+                        if ($pObj) {
+                            $remW = (int)$pObj['weight_remaining'];
+                            $totW = (int)$pObj['weight_total'];
+                            $pIngameId = $pObj['ingame_order_id'];
+                            $pStatus = ((int)$pObj['is_accepted'] === 1) ? 'warehouse' : ((empty($pIngameId) && $remW < $totW) ? 'partially_planned' : 'market');
+                            $emptyRun = $distanceService->getDistance((int)$truckInfo['current_city_id'], (int)$pObj['from_city_id']);
+
+                            array_unshift($_SESSION['tb_suggested_chains'][$truckId], [
+                                'order' => $pObj,
+                                'loaded_weight' => TopologyEngine::calculateLoadedWeight($remW, (int)$truckInfo['capacity_t']),
+                                'available_weight' => $remW,
+                                'is_split' => TopologyEngine::isSplitLoad(TopologyEngine::calculateLoadedWeight($remW, (int)$truckInfo['capacity_t']), $remW),
+                                'empty_run_dist' => $emptyRun,
+                                'status' => $pStatus
+                            ]);
+                        }
+                    }
                 }
-            }
-            $pdo->commit();
+                $pdo->commit();
         } catch (Exception $e) {
             $pdo->rollBack();
             throw $e;
@@ -369,9 +401,10 @@ if (!empty($suggestedChains)) {
                 $step['order']['ingame_order_id']  = $live['ingame_order_id'];
                 $step['order']['is_accepted']      = (int)$live['is_accepted'];
                 $step['order']['weight_remaining'] = (int)$live['weight_remaining'];
+                $step['order']['weight_total']     = (int)$live['weight_total'];
                 $step['order']['revenue']          = (float)$live['revenue'];
-                $step['status']                    = ((int)$live['is_accepted'] === 1) ? 'warehouse' : 'market';
-                $step['available_weight']          = (int)$live['weight_total'];
+                $step['status']                    = ((int)$live['is_accepted'] === 1) ? 'warehouse' : ((empty($live['ingame_order_id']) && (int)$live['weight_remaining'] < (int)$live['weight_total']) ? 'partially_planned' : 'market');
+                $step['available_weight']          = (int)$live['weight_remaining'];
             }
             $chain = array_values($chain);
         }
@@ -837,6 +870,8 @@ if ($focusTruck) {
                                         <td>
                                             <?php if (!empty($order['ingame_order_id'])): ?>
                                                 <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['ingame_order_id']); ?></span>
+                                            <?php elseif (($suggestion['status'] ?? '') === 'partially_planned'): ?>
+                                                <strong class="text-orange" title="Börsenauftrag bereits teilverplant; Ingame-IDN wird beim nächsten Lager-Import verheiratet">IDN ???</strong>
                                             <?php else: ?>
                                                 <span class="text-muted-italic">Marktpool</span>
                                             <?php endif; ?>
@@ -879,7 +914,15 @@ if ($focusTruck) {
                                             </td>
                                         <?php endif; ?>
                                         <td class="status-<?php echo $suggestion['status']; ?>">
-                                            <?php echo $suggestion['status'] == 'warehouse' ? 'LAGER' : 'BÖRSE'; ?>
+                                            <?php 
+                                            if (($suggestion['status'] ?? '') === 'warehouse') {
+                                                echo 'LAGER';
+                                            } elseif (($suggestion['status'] ?? '') === 'partially_planned') {
+                                                echo 'TEILVERPLANT';
+                                            } else {
+                                                echo 'BÖRSE';
+                                            }
+                                            ?>
                                         </td>
                                         <td>
                                             <!-- Archivieren-Button ganz rechts -->

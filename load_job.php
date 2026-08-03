@@ -180,19 +180,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
         $loader = new JobLoader($pdo);
         $loader->execute($truckId, $orderId);
 
-        // --- SCHRITT 1: AUSTRAGUNG DES GELADENEN JOBS AUS DER SESSION-KETTES DES LKW ---
+        // --- SCHRITT 1: FLOTTENWEITE PROPAGIERUNG DES TEILVERPLANTEN JOBS IN DER SESSION ---
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
-        if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
-            foreach ($_SESSION['tb_suggested_chains'][$truckId] as $key => $step) {
-                if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
-                    unset($_SESSION['tb_suggested_chains'][$truckId][$key]);
-                    // Array-Indizes nach dem Löschen wieder fortlaufend nummerieren
-                    $_SESSION['tb_suggested_chains'][$truckId] = array_values($_SESSION['tb_suggested_chains'][$truckId]);
-                    break;
+        if (!empty($_SESSION['tb_suggested_chains']) && is_array($_SESSION['tb_suggested_chains'])) {
+            foreach ($_SESSION['tb_suggested_chains'] as $tId => &$chain) {
+                foreach ($chain as $key => &$step) {
+                    if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
+                        if ((int)$tId === $truckId) {
+                            unset($chain[$key]);
+                            $chain = array_values($chain);
+                            break;
+                        } else {
+                            $step['order']['weight_remaining'] = $remainingWeight;
+                            $step['status'] = 'partially_planned';
+                        }
+                    }
                 }
             }
+            unset($chain, $step);
         }
     } catch (Exception $e) {
         // KORREKTUR: Zeigt den genauen Fehlergrund an, anstatt ihn stillschweigend zu ignorieren

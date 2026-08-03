@@ -131,6 +131,7 @@ class WarehouseParser
                     'is_adr' => $isAdr,
                     'weight_total' => $weightTotal,
                     'weight_remaining' => $weightRemaining,
+                    'weight_loaded' => null,
                     'revenue' => $revenue,
                     'from_city_id' => $fromCityId,
                     'to_city_id' => $toCityId,

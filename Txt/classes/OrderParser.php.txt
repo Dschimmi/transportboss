@@ -138,6 +138,7 @@ class OrderParser
                                 'is_adr' => $isAdr,
                                 'weight_total' => $weight,
                                 'weight_remaining' => $weight,
+                                'weight_loaded' => null,
                                 'revenue' => $revenue,
                                 'from_city_id' => $fromCityId,
                                 'to_city_id' => $toCityId,

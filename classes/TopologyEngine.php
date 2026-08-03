@@ -276,7 +276,7 @@ class TopologyEngine
                 $suggestedChains[$truckId][] = [
                     'order' => $orderToLoad,
                     'loaded_weight' => $loadedWeight,
-                    'available_weight' => (int)$orderToLoad['weight_total'], // Zeigt die original Gesamttonnage (57 t) statt der Restmenge!
+                    'available_weight' => (int)$orderToLoad['weight_remaining'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $bestCandidate['empty_run_dist'],
                     'status' => (int)$orderToLoad['is_accepted'] === 1 ? 'warehouse' : 'market'

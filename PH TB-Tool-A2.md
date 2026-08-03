@@ -76,6 +76,22 @@ Der Mutter-Auftrag (assigned_truck_id = NULL) verbleibt als Anker im Lagerbestan
 3.4.1. Das Dispatcher-Board (dispatcher_board.php) liest für geplante LKW-Touren strikt die Spalte $weight_loaded als ersten Anzeigewert aus.
 3.4.2. Die Darstellung erfolgt ungebündelt und ohne künstliche Deckelung exakt im Format $weight_loaded / $weight_remaining / $weight_total t.
 3.4.3. Innerhalb einer Planungs-Session wird $weight_remaining im Backend und in den Vorschlagslisten des Frontends live und stufenweise für nachfolgende Planungsschritte angepasst.
+3.5. Status-Spezifikation TEILVERPLANT für Marktpool-Teilabschnitte:
+
+3.5.1. Trigger & Auslöse-Zeitpunkt:
+Die Status- und Anzeigenänderung auf TEILVERPLANT erfolgt ausschließlich in dem Moment, in dem für einen Marktpool-Auftrag (ingame_order_id IS NULL, is_accepted = 0) der Button „Laden“ in einer Vorschlagsliste geklickt wird und dadurch ein erster Teilabschnitt ($weight_loaded) auf einen LKW verplant wurde.
+
+3.5.2. Domänen-Begründung:
+Durch den Klick auf „Laden“ hat der Disponent den Marktpool-Auftrag im Spiel angenommen und einen ersten Teilabschnitt auf den LKW verladen. Da im ERP noch kein Lager-Import durchgeführt wurde, ist die Ingame-IDN im System noch unbekannt, aber die im Lager verbliebene Restmenge ($weight_remaining) ist ingame bereits reserviert und gesichert.
+
+3.5.3. Kennzeichnungs-Merkmale im UI:
+Für alle verbleibenden Restabschnitte dieses teilverplanten Markt-Auftrags ändern sich die Anzeigen in den Vorschlagslisten wie folgt:
+3.5.3.1. Spalte „IDN / Pool“: Zeigt den hervorgehobenen Text IDN ??? (mit Tooltip-Hinweis).
+3.5.3.2. Spalte „Tonnage“: Zeigt die Dreier-Kombination $weight_loaded / $weight_remaining / $weight_total t (z. B. 8 / 20 / 28 t).
+3.5.3.3. Spalte „Status“: Zeigt den Text TEILVERPLANT in der Statusklasse .status-partially-planned.
+
+3.5.4. Flottenweite Sofort-Propagierung:
+Nach dem Klick auf „Laden“ muss diese geänderte Anzeige (IDN ???, $weight_loaded / $weight_remaining / $weight_total t, Status TEILVERPLANT) sofort und live in ALLEN generierten Vorschlagslisten ALLER LKW sichtbar sein, die diesen Auftrag als Folgeschritt enthalten.
 4. Schlachtplan / Roadmap zur schrittweisen Behebung
 4.1. Schritt 1 – Datenbank-Schema & Model-Anpassung (Order.php):
 4.1.1. Erstellung und Ausführung der Schema-Migration zur Hinzufügung der Spalte weight_loaded (INT UNSIGNED DEFAULT NULL) in der Datenbank-Tabelle orders.
