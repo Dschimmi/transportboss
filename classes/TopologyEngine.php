@@ -25,6 +25,11 @@ class TopologyEngine
         return min($weightRemaining, $capacity);
     }
 
+    public static function isSplitLoad(int $loadedWeight, int $weightRemaining): bool
+    {
+        return $loadedWeight < $weightRemaining;
+    }
+
     /**
      * Prüft, ob ein Auftrag (Restmenge) durch die Tonnagen-Restriktionen (Min/Max) eines LKW erlaubt ist.
      * Falls die Restriktion verletzt wird, prüft das System über die "Typen-Sicherheits-Weiche" (PH § Exception),
@@ -263,7 +268,7 @@ class TopologyEngine
                 $orderToLoad = &$virtualOrderPool[$poolIndex];
 
                 $loadedWeight = self::calculateLoadedWeight((int)$orderToLoad['weight_remaining'], (int)$t['capacity_t']);
-                $isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
+                $isSplit = self::isSplitLoad($loadedWeight, (int)$orderToLoad['weight_remaining']);$isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
                 $availableWeight = (int)$orderToLoad['weight_remaining'];
 
                 $orderToLoad['weight_remaining'] -= $loadedWeight;
@@ -715,7 +720,7 @@ class TopologyEngine
 
             $emptyRunDist = $this->distanceService->getDistance($currentCityId, (int)$order['from_city_id']);
             $loadedWeight = self::calculateLoadedWeight((int)$order['weight_remaining'], $capacity);
-            $isSplit = (int)$order['weight_remaining'] > $capacity;
+            $isSplit = self::isSplitLoad($loadedWeight, (int)$order['weight_remaining']);
 
             // Simuliere die vorausschauende Kette (Radar-Stufe)
             $radarIndicator = $this->simulateRadarChain((int)$order['to_city_id'], $truckId, $vehicleType, $capacity);
@@ -761,7 +766,7 @@ class TopologyEngine
                 $routeDistance = $this->distanceService->getDistance((int)$fallbackOrder['from_city_id'], (int)$fallbackOrder['to_city_id']);
                 
                 $loadedWeight = self::calculateLoadedWeight((int)$fallbackOrder['weight_remaining'], $capacity);
-                $isSplit = (int)$fallbackOrder['weight_remaining'] > $capacity;
+                $isSplit = self::isSplitLoad($loadedWeight, (int)$fallbackOrder['weight_remaining']);
 
                 $radarScan[] = [
                     'order' => $fallbackOrder,

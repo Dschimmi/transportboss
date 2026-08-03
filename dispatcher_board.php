@@ -798,11 +798,11 @@ if ($focusTruck) {
                                 <tr>
                                     <th>Laden</th>
                                     <th>IDN / Pool</th>
-                                    <th>Route</th>
+                                    <th>Route (mit Streckenlänge)</th>
                                     <th>Frachttyp</th>
                                     <th>Tonnage</th>
                                     <th>Erlös</th>
-                                    <th>Distanz</th>
+                                    <th>Anfahrt</th>
                                     <?php if ($planningMode === 'radar'): ?>
                                         <th>Ketten-Radar</th>
                                     <?php endif; ?>
@@ -844,6 +844,7 @@ if ($focusTruck) {
                                         <td>
                                             <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['from_city_name']); ?></span>
                                             ➔ <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['to_city_name']); ?></span>
+                                            (<?php echo $distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']); ?> km)
                                         </td>
                                         <td><?php echo htmlspecialchars($order['freight_type']); ?></td>
                                         <td class="<?php echo !empty($suggestion['violates_weight_lock']) ? 'text-warning-bold' : ''; ?>" title="L = <?= $suggestion['loaded_weight'] ?>t (Geladen) | A = <?= $suggestion['available_weight'] ?>t (Aktuell verfügbar) | U = <?= (int)($order['weight_total'] ?? $suggestion['available_weight']) ?>t (Ursprünglich gesamt)">
@@ -861,8 +862,11 @@ if ($focusTruck) {
                                                 ? ' <a href="matrix_admin.php?city_id=' . $virtualStartCityId . '" class="badge-missing" style="text-decoration:none;" title="Achtung: Anfahrts-Distanz ab LKW-Standort fehlt in der Matrix! Hier klicken zum Nachpflegen.">⚠️ Distanz fehlt</a>' 
                                                 : '';
                                             ?>
-                                            <?php echo $suggestion['empty_run_dist']; ?> km
-                                            <?php echo $suggestion['empty_run_dist'] > 0 ? ' <small class="text-anfahrt">(Anfahrt)</small>' : ' <small class="text-direkt">(Direkt)</small>'; ?>
+                                            <?php 
+                                            $emptyDist = (int)$suggestion['empty_run_dist'];
+                                            $distColorClass = ($emptyDist === 0) ? 'price-good' : (($emptyDist <= 50) ? 'price-average' : 'price-very-bad');
+                                            ?>
+                                            <strong class="<?php echo $distColorClass; ?>"><?php echo $emptyDist; ?> km</strong>
                                             <?php echo $anfahrtMissingBadge; ?>
                                         </td>
                                         <?php if ($planningMode === 'radar'): ?>
