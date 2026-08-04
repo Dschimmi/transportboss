@@ -268,10 +268,14 @@ class TopologyEngine
                 $orderToLoad = &$virtualOrderPool[$poolIndex];
 
                 $loadedWeight = self::calculateLoadedWeight((int)$orderToLoad['weight_remaining'], (int)$t['capacity_t']);
-                $isSplit = self::isSplitLoad($loadedWeight, (int)$orderToLoad['weight_remaining']);$isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
+                $isSplit = self::isSplitLoad($loadedWeight, (int)$orderToLoad['weight_remaining']);
                 $availableWeight = (int)$orderToLoad['weight_remaining'];
 
                 $orderToLoad['weight_remaining'] -= $loadedWeight;
+
+                $suggestedStatus = (int)$orderToLoad['is_accepted'] === 1 
+                    ? 'warehouse' 
+                    : ((empty($orderToLoad['ingame_order_id']) && (int)$orderToLoad['weight_remaining'] < (int)$orderToLoad['weight_total']) ? 'partially_planned' : 'market');
 
                 $suggestedChains[$truckId][] = [
                     'order' => $orderToLoad,
@@ -279,7 +283,7 @@ class TopologyEngine
                     'available_weight' => (int)$orderToLoad['weight_remaining'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $bestCandidate['empty_run_dist'],
-                    'status' => (int)$orderToLoad['is_accepted'] === 1 ? 'warehouse' : 'market'
+                    'status' => $suggestedStatus
                 ];
 
                 $virtualEndpoints[$truckId] = $orderToLoad['to_city_id'];
@@ -730,14 +734,18 @@ class TopologyEngine
             $routeDistance = $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']);
             $tripYield = $proportionalRevenue / max(1, $routeDistance);
 
+            $orderStatus = (int)$order['is_accepted'] === 1 
+                ? 'warehouse' 
+                : ((empty($order['ingame_order_id']) && (int)$order['weight_remaining'] < (int)$order['weight_total']) ? 'partially_planned' : 'market');
+
             $radarScan[] = [
                 'order' => $order,
                 'loaded_weight' => $loadedWeight,
-                'available_weight' => (int)$order['weight_total'],
+                'available_weight' => (int)$order['weight_remaining'],
                 'is_split' => $isSplit,
                 'empty_run_dist' => $emptyRunDist,
                 'earning_per_tkm' => $tripYield, // Nutzt die LKW-spezifische Marge für das Sortierungs-Ranking
-                'status' => (int)$order['is_accepted'] === 1 ? 'warehouse' : 'market',
+                'status' => $orderStatus,
                 'radar_indicator' => $radarIndicator,
                 'violates_weight_lock' => $violatesWeightLock
             ];
@@ -768,15 +776,19 @@ class TopologyEngine
                 $loadedWeight = self::calculateLoadedWeight((int)$fallbackOrder['weight_remaining'], $capacity);
                 $isSplit = self::isSplitLoad($loadedWeight, (int)$fallbackOrder['weight_remaining']);
 
+                $fallbackStatus = (int)$fallbackOrder['is_accepted'] === 1 
+                    ? 'warehouse' 
+                    : ((empty($fallbackOrder['ingame_order_id']) && (int)$fallbackOrder['weight_remaining'] < (int)$fallbackOrder['weight_total']) ? 'partially_planned' : 'market');
+
                 $radarScan[] = [
                     'order' => $fallbackOrder,
                     'loaded_weight' => $loadedWeight,
-                    'available_weight' => (int)$fallbackOrder['weight_total'],
+                    'available_weight' => (int)$fallbackOrder['weight_remaining'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $distanceToOrder,
                     'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
                     'is_fallback' => true,
-                    'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market',
+                    'status' => $fallbackStatus,
                     'radar_indicator' => $this->simulateRadarChain((int)$fallbackOrder['to_city_id'], $truckId, $vehicleType, $capacity),
                     'violates_weight_lock' => $violatesWeightLock
                 ];

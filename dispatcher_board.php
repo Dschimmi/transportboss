@@ -913,7 +913,7 @@ if ($focusTruck) {
                                                 ?>
                                             </td>
                                         <?php endif; ?>
-                                        <td class="status-<?php echo $suggestion['status']; ?>">
+                                        <td class="status-<?php echo str_replace('_', '-', $suggestion['status']); ?>">
                                             <?php 
                                             if (($suggestion['status'] ?? '') === 'warehouse') {
                                                 echo 'LAGER';

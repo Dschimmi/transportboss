@@ -118,12 +118,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if ($info && $info['assigned_truck_id'] && $info['assigned_at']) {
         $truckId = (int)$info['assigned_truck_id'];
         $assignedAt = $info['assigned_at'];
+        $truckInfo = $truckRepo->getById($truckId);
+        if ($truckInfo === null) {
+            throw new RuntimeException("Truck $truckId nicht gefunden.");
+        }
 
         // 2. MINIMALINVASIVE SCHNITTSTELLE:
         // Wir laden alle betroffenen Folge-Aufträge dieser Tour chronologisch, um verplante
         // Split-Klone sauber zu löschen und ihre Tonnagen sicher zurückzuerstatten!
         $stmtAffected = $pdo->prepare("
-            SELECT id, ingame_order_id, weight_total 
+            SELECT id, ingame_order_id, weight_total, weight_loaded, weight_remaining, fingerprint, freight_type, commodity, is_adr, from_city_id, to_city_id, is_accepted 
             FROM orders 
             WHERE assigned_truck_id = ? 
               AND is_archived = 0 
@@ -171,8 +175,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
                     // D. Den entladenen Schritt exklusiv in die Vorschlagskette dieses LKWs zurückschreiben
                     if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
-                        $pStmt = $pdo->prepare("SELECT o.id, o.weight_remaining, o.weight_total, o.ingame_order_id, o.fingerprint, o.freight_type, o.commodity, o.is_adr, o.revenue, o.from_city_id, o.to_city_id, o.is_accepted, c1.name AS from_city_name, c2.name AS to_city_name FROM orders o JOIN cities c1 ON o.from_city_id = c1.id JOIN cities c2 ON o.to_city_id = c2.id WHERE " . (($idn !== null && str_contains($idn, '-')) ? "o.ingame_order_id = ?" : "o.id = ?"));
-                        $pStmt->execute([($idn !== null && str_contains($idn, '-')) ? explode('-', $idn)[0] : $oId]);
+                        $targetOrderId = ($motherId !== false) ? (int)$motherId : $oId;
+                        $pStmt = $pdo->prepare("SELECT o.id, o.weight_remaining, o.weight_total, o.ingame_order_id, o.fingerprint, o.freight_type, o.commodity, o.is_adr, o.revenue, o.from_city_id, o.to_city_id, o.is_accepted, c1.name AS from_city_name, c2.name AS to_city_name FROM orders o JOIN cities c1 ON o.from_city_id = c1.id JOIN cities c2 ON o.to_city_id = c2.id WHERE o.id = ?");
+                        $pStmt->execute([$targetOrderId]);
                         $pObj = $pStmt->fetch(PDO::FETCH_ASSOC);
 
                         if ($pObj) {
@@ -180,13 +185,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             $totW = (int)$pObj['weight_total'];
                             $pIngameId = $pObj['ingame_order_id'];
                             $pStatus = ((int)$pObj['is_accepted'] === 1) ? 'warehouse' : ((empty($pIngameId) && $remW < $totW) ? 'partially_planned' : 'market');
-                            $emptyRun = $distanceService->getDistance((int)$truck['current_city_id'], (int)$pObj['from_city_id']);
+                            $emptyRun = $distanceService->getDistance((int)$truckInfo['current_city_id'], (int)$pObj['from_city_id']);
 
                             array_unshift($_SESSION['tb_suggested_chains'][$truckId], [
                                 'order' => $pObj,
-                                'loaded_weight' => TopologyEngine::calculateLoadedWeight($remW, (int)$truck['capacity_t']),
+                                'loaded_weight' => TopologyEngine::calculateLoadedWeight($remW, (int)$truckInfo['capacity_t']),
                                 'available_weight' => $remW,
-                                'is_split' => TopologyEngine::isSplitLoad(TopologyEngine::calculateLoadedWeight($remW, (int)$truck['capacity_t']), $remW),
+                                'is_split' => TopologyEngine::isSplitLoad(TopologyEngine::calculateLoadedWeight($remW, (int)$truckInfo['capacity_t']), $remW),
                                 'empty_run_dist' => $emptyRun,
                                 'status' => $pStatus
                             ]);

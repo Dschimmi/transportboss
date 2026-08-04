@@ -352,6 +352,7 @@ body {
 .text-tonnage { color: #3498db; font-weight: bold; }
 .text-market { color: #e67e22; font-weight: bold; }
 .text-lager { color: #3498db; font-weight: bold; }
+.status-partially-planned { color: #f39c12; font-weight: bold; }
 
 
 /* ==========================================================================

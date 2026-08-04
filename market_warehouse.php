@@ -126,19 +126,12 @@ class WarehouseSynchronizer
         }
 
         // 3. IDN existiert noch nicht. Versuche einen passenden Börsenauftrag zu heiraten.
-        // KORREKTUR: Wir suchen in aktiven (is_archived = 0) UND archivierten (is_archived = 1) Aufträgen.
-        // Sortiert aktive nach oben und wählt das jüngste passende Pendant aus.
-        // KORREKTUR: Wir erlauben auch den Abgleich bereits zugewiesener (geladener) Börsenaufträge,
-        // indem wir die Einschränkung 'assigned_truck_id IS NULL' aufheben.
-        // Bereits zugewiesene Aufträge werden bei der Sortierung bevorzugt, damit die LKW-Tour aktualisiert wird.
-        // Wir nutzen eine Delta-Prüfung ABS(revenue - :revenue) < 0.01, um Float-Präzisionsfehler bei DECIMAL-Spalten zu verhindern.
-        // KORREKTUR: Fingerprint- & Frachtraten-Matching (€/t) für Teilladungen/Splits!
         $unitRate = (int)$order['weight_total'] > 0 ? ((float)$order['revenue'] / (int)$order['weight_total']) : 0.0;
 
         $stmtSearch = $this->pdo->prepare("
-            SELECT id, is_archived 
+            SELECT id, fingerprint, is_archived 
             FROM orders 
-            WHERE is_accepted = 0 
+            WHERE ingame_order_id IS NULL 
               AND is_archived = 0
               AND (
                     (fingerprint IS NOT NULL AND fingerprint = :fingerprint)
@@ -147,11 +140,11 @@ class WarehouseSynchronizer
                 AND to_city_id = :to_city 
                 AND (
                     ABS((revenue / NULLIF(weight_total, 0)) - :unit_rate_1) < 0.05
-                 OR ABS((revenue / NULLIF(weight_remaining, 0)) - :unit_rate_2) < 0.05
+                 OR ABS((revenue / NULLIF(COALESCE(weight_loaded, weight_remaining), 0)) - :unit_rate_2) < 0.05
                 )
                  )
               )
-            ORDER BY assigned_truck_id DESC, id DESC
+            ORDER BY assigned_truck_id IS NULL DESC, id ASC
             LIMIT 1
         ");
 
@@ -166,7 +159,25 @@ class WarehouseSynchronizer
         $matched = $stmtSearch->fetch(PDO::FETCH_ASSOC);
 
         if ($matched !== false) {
-            // Fall 3: Match gefunden -> Börsenauftrag verheiraten und aktivieren
+            // Ermittle bereits verplante Klon-Tonnagen auf LKWs, um Doppelzählung beim Mutterauftrag zu verhindern
+            $matchedFingerprint = $matched['fingerprint'] ?? ($order['fingerprint'] ?? '');
+            $stmtClonesWeight = $this->pdo->prepare("
+                SELECT COALESCE(SUM(weight_loaded), 0) 
+                FROM orders 
+                WHERE fingerprint = :fingerprint 
+                  AND assigned_truck_id IS NOT NULL 
+                  AND is_archived = 0
+                  AND id != :matched_id
+            ");
+            $stmtClonesWeight->execute([
+                'fingerprint' => $matchedFingerprint,
+                'matched_id'  => (int)$matched['id']
+            ]);
+            $assignedClonesWeight = (int)$stmtClonesWeight->fetchColumn();
+
+            $adjustedRemaining = max(0, (int)$order['weight_remaining'] - $assignedClonesWeight);
+
+            // Fall 3: Match gefunden -> Börsenauftrag verheiraten und Restmenge anpassen
             $stmtUpdate = $this->pdo->prepare("
                 UPDATE orders 
                 SET ingame_order_id = :idn,
@@ -178,11 +189,11 @@ class WarehouseSynchronizer
             ");
             $stmtUpdate->execute([
                 'idn' => $order['ingame_order_id'],
-                'weight_remaining' => $order['weight_remaining'],
+                'weight_remaining' => $adjustedRemaining,
                 'id' => (int)$matched['id']
             ]);
 
-            // --- NEU: PROPAGIERUNG AN BEREITS GELADENE TEILSTÜCKE AUF LKWS ---
+            // --- PROPAGIERUNG AN BEREITS GELADENE TEILSTÜCKE AUF LKWS ---
             $this->propagateMarriageToClones((int)$matched['id'], $order['ingame_order_id']);
 
             return 1; // Code 1: Frisch verheiratet / Reaktiviert
@@ -219,7 +230,7 @@ class WarehouseSynchronizer
         private function propagateMarriageToClones(int $parentOrderId, string $baseIdn): void
         {
             // 1. Stammdaten des Mutter-Auftrags ermitteln
-            $stmtInfo = $this->pdo->prepare("SELECT fingerprint, from_city_id, to_city_id, weight_total, revenue FROM orders WHERE id = ?");
+            $stmtInfo = $this->pdo->prepare("SELECT fingerprint, from_city_id, to_city_id, weight_total, revenue, commodity, freight_type FROM orders WHERE id = ?");
             $stmtInfo->execute([$parentOrderId]);
             $parent = $stmtInfo->fetch(PDO::FETCH_ASSOC);
 
@@ -230,32 +241,40 @@ class WarehouseSynchronizer
             $fingerprint = $parent['fingerprint'];
             $unitRate = (int)$parent['weight_total'] > 0 ? ((float)$parent['revenue'] / (int)$parent['weight_total']) : 0.0;
 
-            // 2. Alle noch unakzeptierten Klone auf LKWs suchen (per Fingerprint ODER Route + Frachtrate)
+            // 2. Alle LKW-Klone ohne IDN-Suffix suchen (per Fingerprint ODER Route + Ware ODER Frachtrate)
             $stmtClones = $this->pdo->prepare("
                 SELECT id 
                 FROM orders 
-                WHERE is_accepted = 0 
-                  AND assigned_truck_id IS NOT NULL 
+                WHERE assigned_truck_id IS NOT NULL 
                   AND is_archived = 0
+                  AND (ingame_order_id IS NULL OR ingame_order_id NOT LIKE :base_idn_pattern)
+                  AND id != :parent_id
                   AND (
-                        (fingerprint IS NOT NULL AND fingerprint = :fingerprint)
+                        (fingerprint IS NOT NULL AND fingerprint != '' AND fingerprint = :fingerprint)
                      OR (
                         from_city_id = :from_city 
                     AND to_city_id = :to_city 
                     AND (
-                        ABS((revenue / NULLIF(weight_total, 0)) - :unit_rate_1) < 0.05
+                        (commodity = :commodity AND freight_type = :freight_type)
+                     OR ABS((revenue / NULLIF(COALESCE(weight_loaded, weight_total - weight_remaining), 0)) - :unit_rate_1) < 0.05
                      OR ABS((revenue / NULLIF(weight_remaining, 0)) - :unit_rate_2) < 0.05
+                     OR ABS((revenue / NULLIF(weight_total, 0)) - :unit_rate_3) < 0.05
                     )
                      )
                   )
                 ORDER BY id ASC
             ");
             $stmtClones->execute([
-                'fingerprint' => $fingerprint ?? '',
-                'from_city'   => $parent['from_city_id'],
-                'to_city'     => $parent['to_city_id'],
-                'unit_rate_1' => $unitRate,
-                'unit_rate_2' => $unitRate
+                'base_idn_pattern' => $baseIdn . '-%',
+                'parent_id'        => $parentOrderId,
+                'fingerprint'      => $fingerprint ?? '',
+                'from_city'        => $parent['from_city_id'],
+                'to_city'          => $parent['to_city_id'],
+                'commodity'        => $parent['commodity'],
+                'freight_type'     => $parent['freight_type'],
+                'unit_rate_1'      => $unitRate,
+                'unit_rate_2'      => $unitRate,
+                'unit_rate_3'      => $unitRate
             ]);
             $clones = $stmtClones->fetchAll(PDO::FETCH_COLUMN);
 
