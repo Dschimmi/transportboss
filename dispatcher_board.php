@@ -1020,41 +1020,6 @@ if ($focusTruck) {
                 }
             });
         }
-        // --- Live-Kopieren von Städtenamen, IDNs und konvertierten Geldbeträgen (PH § 1.4.5) ---
-        ['.detail-top-half', '.detail-bottom-half'].forEach(selector => {
-            const container = document.querySelector(selector);
-            if (container) {
-                container.addEventListener('click', function(e) {
-                    if (e.target && e.target.classList.contains('copy-city')) {
-                        let textToCopy = e.target.textContent.trim();
-                        
-                        // 1. Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
-                        if (textToCopy.startsWith('IDN') && textToCopy.includes('-')) {
-                            textToCopy = textToCopy.split('-')[0];
-                        }
-                        
-                        // 2. Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
-                        if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
-                            // Währungssymbole und Whitespaces entfernen
-                            textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
-                            // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
-                            textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
-                        }
-                        
-                        // Native Zwischenablage-API nutzen
-                        navigator.clipboard.writeText(textToCopy).then(() => {
-                            // Visuelles Erfolgs-Feedback (Flasht kurz orange)
-                            e.target.classList.add('text-orange');
-                            setTimeout(() => {
-                                e.target.classList.remove('text-orange');
-                            }, 500);
-                        }).catch(err => {
-                            // Geräuschloser Fallback
-                        });
-                    }
-                });
-            }
-        });
     </script>
 </body>
 </html>

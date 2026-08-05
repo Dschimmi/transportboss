@@ -105,6 +105,12 @@ class OrderParser
                     $fromCityName = trim($cleanLines[$i + 2]);
                     $toCityName = trim($cleanLines[$i + 3]);
 
+                    // Validierung an der Wurzel: Müllzeilen (IDNs, Währungen) sofort verwerfen
+                    if (!\CityService::isValidCityName($fromCityName) || !\CityService::isValidCityName($toCityName)) {
+                        $i++;
+                        continue;
+                    }
+
                     // 4. Distanz auslesen
                     $distanceLine = $cleanLines[$i + 4];
                     $distance = 0;

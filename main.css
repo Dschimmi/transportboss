@@ -354,6 +354,12 @@ body {
 .text-lager { color: #3498db; font-weight: bold; }
 .status-partially-planned { color: #f39c12; font-weight: bold; }
 
+/* Dauerhafte Hervorhebung für das aktuell kopierte Element (WCAG-konform & scharf) */
+.copied-active {
+    color: #f39c12 !important;
+    font-weight: bold !important;
+}
+
 
 /* ==========================================================================
    DISPATCHER BOARD: SPEZIFISCHES 3-SPALTEN WORKSPACE-DESIGN (PH 1.4.2)

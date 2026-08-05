@@ -14,6 +14,26 @@ class CityService
     }
 
     /**
+     * Prüft zentral und systemweit (DRY), ob ein String ein valider Städtename ist.
+     * Schließt IDN-Nummern, reine Zahlen, Geldbeträge und Ingame-Schlüsselwörter aus.
+     */
+    public static function isValidCityName(string $name): bool
+    {
+        $clean = trim($name);
+        if ($clean === '' || mb_strlen($clean) < 2) {
+            return false;
+        }
+
+        if (preg_match('/^IDN/i', $clean) 
+            || is_numeric($clean) 
+            || preg_match('/(Zahlung|Gefahrgut|Anfahrt|VOR ORT|Kurier|Stückgut|Schüttgut|Pritsche|Plane|Koffer|Kühlwagen|Silo|Tankwagen|Schwertransport|ISO-Container|Super-Liner)/i', $clean)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Löst einen Stadtnamen in eine ID auf. Legt die Stadt bei Bedarf neu an (PH 3.2.2.2)[cite: 3].
      *
      * @param string $name Der Name der Stadt aus dem Spiel-Text
