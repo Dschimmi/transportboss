@@ -155,13 +155,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
                     if ($motherId !== false) {
                         // A. Klon: Tonnage auf Mutter-Auftrag buchen und Klon löschen
+                        // ==================== DEBUG LOG START ====================
+                        $stmtBefore = $pdo->prepare("SELECT weight_remaining, weight_total FROM orders WHERE id = ?");
+                        $stmtBefore->execute([(int)$motherId]);
+                        $mBefore = $stmtBefore->fetch(PDO::FETCH_ASSOC);
+                        $wBefore = $mBefore ? (int)$mBefore['weight_remaining'] : -1;
+                        $wTotal = $mBefore ? (int)$mBefore['weight_total'] : -1;
+
                         $stmtRefund = $pdo->prepare("UPDATE orders SET weight_remaining = weight_remaining + ? WHERE id = ?");
                         $stmtRefund->execute([$loadedWeight, (int)$motherId]);
+
+                        $wAfter = $wBefore + $loadedWeight;
+                        $logMsg = date('[Y-m-d H:i:s] ') . "UNLOAD CLONE (Case A): Clone ID $oId (IDN: " . ($idn ?? 'NULL') . ") | Refunding $loadedWeight t to Mother ID $motherId | Mother WeightTotal: $wTotal t | Mother WeightRemaining: $wBefore t -> $wAfter t\n";
+                        file_put_contents(__DIR__ . '/dispo_debug.log', $logMsg, FILE_APPEND);
+                        // ==================== DEBUG LOG END ======================
 
                         $stmtDelete = $pdo->prepare("DELETE FROM orders WHERE id = ?");
                         $stmtDelete->execute([$oId]);
                     } else {
                         // B. Ungeteilter Komplettauftrag: Zurück ins Lager/Pool stellen
+                        // ==================== DEBUG LOG START ====================
+                        $logMsg = date('[Y-m-d H:i:s] ') . "UNLOAD COMPLETE ORDER (Case B): Order ID $oId (IDN: " . ($idn ?? 'NULL') . ") | Unassigned from Truck $truckId | Resetting weight_remaining to weight_total ({$ord['weight_total']} t)\n";
+                        file_put_contents(__DIR__ . '/dispo_debug.log', $logMsg, FILE_APPEND);
+                        // ==================== DEBUG LOG END ======================
+
                         $stmtUnassign = $pdo->prepare("
                             UPDATE orders 
                             SET assigned_truck_id = NULL, 
@@ -185,7 +202,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             $totW = (int)$pObj['weight_total'];
                             $pIngameId = $pObj['ingame_order_id'];
                             $pStatus = ((int)$pObj['is_accepted'] === 1) ? 'warehouse' : ((empty($pIngameId) && $remW < $totW) ? 'partially_planned' : 'market');
-                            $emptyRun = $distanceService->getDistance((int)$truckInfo['current_city_id'], (int)$pObj['from_city_id']);
+
+                            // Verbleibendes Tourende des LKWs nach dem Entladen ermitteln
+                            $lastCityStmt = $pdo->prepare("SELECT to_city_id FROM orders WHERE assigned_truck_id = ? AND is_archived = 0 ORDER BY assigned_at DESC LIMIT 1");
+                            $lastCityStmt->execute([$truckId]);
+                            $remainingTourEnd = $lastCityStmt->fetchColumn();
+                            $effectiveStartCity = $remainingTourEnd ? (int)$remainingTourEnd : (int)$truckInfo['current_city_id'];
+
+                            $emptyRun = $distanceService->getDistance($effectiveStartCity, (int)$pObj['from_city_id']);
 
                             array_unshift($_SESSION['tb_suggested_chains'][$truckId], [
                                 'order' => $pObj,

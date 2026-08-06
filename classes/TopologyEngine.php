@@ -383,7 +383,7 @@ class TopologyEngine
 
         // Fallback: Falls keine regionalen Vorschläge vorliegen
         if (empty($suggestions)) {
-            $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t']);
+            $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t'], $currentCityId);
             foreach ($fallbackOrders as $fallbackOrder) {
                 // Tonnagen-Restriktionen für Fallback prüfen
                 if (!$this->isOrderAllowedByWeight($fallbackOrder, $truck, $allOwnedTrucks)) {
@@ -599,13 +599,15 @@ class TopologyEngine
      * @param int $capacity Die Kapazität des Fahrzeugs
      * @return array Array mit Fallback-Aufträgen
      */
-    private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity): array
+    private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity, int $currentCityId = 0): array
     {
-        // Hole die aktuelle Position des LKW für den Distanzabgleich
-        $stmtTruckCity = $this->pdo->prepare("SELECT current_city_id FROM trucks WHERE id = ?");
-        $stmtTruckCity->execute([$truckId]);
-        $truckInfo = $stmtTruckCity->fetch(PDO::FETCH_ASSOC);
-        $currentCityId = $truckInfo ? (int)$truckInfo['current_city_id'] : 0;
+        // Falls kein virtuelles Tourende übergeben wurde, Fallback auf physischen Standort
+        if ($currentCityId <= 0) {
+            $stmtTruckCity = $this->pdo->prepare("SELECT current_city_id FROM trucks WHERE id = ?");
+            $stmtTruckCity->execute([$truckId]);
+            $truckInfo = $stmtTruckCity->fetch(PDO::FETCH_ASSOC);
+            $currentCityId = $truckInfo ? (int)$truckInfo['current_city_id'] : 0;
+        }
 
         $hasAdr = $this->hasAdrDriverForTruck($truckId);
         $compatibleTypes = $this->getCompatibleFreightTypes($vehicleType);
@@ -638,7 +640,6 @@ class TopologyEngine
             WHERE o.is_archived = 0
               AND o.weight_remaining > 0
               AND o.freight_type IN ($placeholdersStr)
-              AND o.weight_total <= :capacity
               AND (o.is_adr = 0 OR :has_adr = 1)
               AND o.assigned_truck_id IS NULL
             ORDER BY empty_run_dist ASC, (o.revenue / NULLIF(o.weight_total, 0)) DESC
@@ -753,7 +754,7 @@ class TopologyEngine
 
         // 4. DIE 3er-GARANTIE (PADDING)
         if (count($radarScan) < 3) {
-            $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity);
+            $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity, $currentCityId);
             $existingIds = array_column(array_column($radarScan, 'order'), 'id');
 
             foreach ($fallbackOrders as $fallbackOrder) {

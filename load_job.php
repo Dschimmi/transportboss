@@ -84,10 +84,16 @@ class JobLoader
                 throw new Exception("Dieser Auftrag hat keine verbleibende Tonnage mehr!");
             }
 
-            if ($weightRemaining > $capacity) {
-                // --- FALL A: SPLITTING (Teillieferung notwendig) ---
+            // Klon-Erzeugung erzwingen wenn Restgewicht > Kapazität ODER wenn der Auftrag bereits gesplittet ist (PH A2 § 3.3.4)
+            if ($weightRemaining > $capacity || $weightRemaining < $weightTotal) {
+                // --- FALL A: SPLITTING / KLON-ERZEUGUNG (Mutterauftrag bleibt Anker im Pool) ---
                 $loadedWeight = $capacity;
                 $remainingWeight = $weightRemaining - $loadedWeight;
+
+                // ==================== DEBUG LOG START ====================
+                $logMsg = date('[Y-m-d H:i:s] ') . "LOAD SPLIT: Order ID $orderId (IDN: " . ($order['ingame_order_id'] ?? 'NULL') . ") | Loaded $loadedWeight t on Truck $truckId | Mother Remaining before: $weightRemaining t -> after: $remainingWeight t\n";
+                file_put_contents(__DIR__ . '/dispo_debug.log', $logMsg, FILE_APPEND);
+                // ==================== DEBUG LOG END ======================
 
                 // 1. Proportionalen Erlös für die geladene Teilladung berechnen
                 $proportionalRevenue = round(($revenue / $weightTotal) * $loadedWeight, 2);
