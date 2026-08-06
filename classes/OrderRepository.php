@@ -193,4 +193,69 @@ class OrderRepository
         ");
         return $stmt->execute([$orderId]);
     }
+
+    /**
+     * Prüft, ob ein Auftragsdatensatz ein Klon (Teilladungs-Suffix) ist.
+     */
+    public static function isClone(array $ord): bool
+    {
+        return !empty($ord['ingame_order_id']) && str_contains($ord['ingame_order_id'], '-');
+    }
+
+    /**
+     * Bucht das geladene Gewicht eines Klons auf den Mutterauftrag zurück.
+     * Wirft eine RuntimeException, falls weight_loaded NULL ist oder die Mutter nicht existiert.
+     */
+    public function refundClone(array $ord): void
+    {
+        if (!isset($ord['weight_loaded']) || $ord['weight_loaded'] === null) {
+            throw new RuntimeException("Klon ID {$ord['id']} ({$ord['ingame_order_id']}) besitzt kein weight_loaded.");
+        }
+
+        $loadedWeight = (int)$ord['weight_loaded'];
+        $baseIdn = explode('-', $ord['ingame_order_id'])[0];
+
+        $motherStmt = $this->pdo->prepare("
+            SELECT id 
+            FROM orders 
+            WHERE ingame_order_id = ? 
+              AND assigned_truck_id IS NULL 
+              AND is_archived = 0 
+            LIMIT 1
+        ");
+        $motherStmt->execute([$baseIdn]);
+        $motherId = $motherStmt->fetchColumn();
+
+        if ($motherId === false) {
+            throw new RuntimeException("Mutterauftrag '$baseIdn' für Klon ID {$ord['id']} nicht im Pool/Lager gefunden.");
+        }
+
+        $stmtRefund = $this->pdo->prepare("UPDATE orders SET weight_remaining = weight_remaining + ? WHERE id = ?");
+        $stmtRefund->execute([$loadedWeight, (int)$motherId]);
+    }
+
+    /**
+     * Löscht einen Klon nach der Tonnage-Rückbuchung.
+     */
+    public function deleteClone(int $cloneId): void
+    {
+        $stmtDelete = $this->pdo->prepare("DELETE FROM orders WHERE id = ?");
+        $stmtDelete->execute([$cloneId]);
+    }
+
+    /**
+     * Stellt einen ungeteilten Einzelauftrag zurück in den Pool.
+     */
+    public function releaseSingleOrder(int $orderId): void
+    {
+        $stmtUnassign = $this->pdo->prepare("
+            UPDATE orders 
+            SET assigned_truck_id = NULL, 
+                assigned_at = NULL, 
+                weight_loaded = NULL, 
+                weight_remaining = weight_total 
+            WHERE id = ?
+        ");
+        $stmtUnassign->execute([$orderId]);
+    }
 }

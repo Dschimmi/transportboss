@@ -139,56 +139,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $pdo->beginTransaction();
         try {
             foreach ($affectedOrders as $ord) {
-                    $oId = (int)$ord['id'];
-                    $idn = $ord['ingame_order_id'];
-                    $loadedWeight = (int)($ord['weight_loaded'] ?? $ord['weight_remaining']);
+                $oId = (int)$ord['id'];
 
-                    // DB-Check: Existiert ein unverplanter Mutter-Auftrag im Lager/Pool?
-                    if ($idn !== null && str_contains($idn, '-')) {
-                        $motherStmt = $pdo->prepare("SELECT id FROM orders WHERE ingame_order_id = ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
-                        $motherStmt->execute([explode('-', $idn)[0]]);
-                    } else {
-                        $motherStmt = $pdo->prepare("SELECT id FROM orders WHERE fingerprint = ? AND id != ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
-                        $motherStmt->execute([$ord['fingerprint'], $oId]);
-                    }
-                    $motherId = $motherStmt->fetchColumn();
-
-                    if ($motherId !== false) {
-                        // A. Klon: Tonnage auf Mutter-Auftrag buchen und Klon löschen
-                        // ==================== DEBUG LOG START ====================
-                        $stmtBefore = $pdo->prepare("SELECT weight_remaining, weight_total FROM orders WHERE id = ?");
-                        $stmtBefore->execute([(int)$motherId]);
-                        $mBefore = $stmtBefore->fetch(PDO::FETCH_ASSOC);
-                        $wBefore = $mBefore ? (int)$mBefore['weight_remaining'] : -1;
-                        $wTotal = $mBefore ? (int)$mBefore['weight_total'] : -1;
-
-                        $stmtRefund = $pdo->prepare("UPDATE orders SET weight_remaining = weight_remaining + ? WHERE id = ?");
-                        $stmtRefund->execute([$loadedWeight, (int)$motherId]);
-
-                        $wAfter = $wBefore + $loadedWeight;
-                        $logMsg = date('[Y-m-d H:i:s] ') . "UNLOAD CLONE (Case A): Clone ID $oId (IDN: " . ($idn ?? 'NULL') . ") | Refunding $loadedWeight t to Mother ID $motherId | Mother WeightTotal: $wTotal t | Mother WeightRemaining: $wBefore t -> $wAfter t\n";
-                        file_put_contents(__DIR__ . '/dispo_debug.log', $logMsg, FILE_APPEND);
-                        // ==================== DEBUG LOG END ======================
-
-                        $stmtDelete = $pdo->prepare("DELETE FROM orders WHERE id = ?");
-                        $stmtDelete->execute([$oId]);
-                    } else {
-                        // B. Ungeteilter Komplettauftrag: Zurück ins Lager/Pool stellen
-                        // ==================== DEBUG LOG START ====================
-                        $logMsg = date('[Y-m-d H:i:s] ') . "UNLOAD COMPLETE ORDER (Case B): Order ID $oId (IDN: " . ($idn ?? 'NULL') . ") | Unassigned from Truck $truckId | Resetting weight_remaining to weight_total ({$ord['weight_total']} t)\n";
-                        file_put_contents(__DIR__ . '/dispo_debug.log', $logMsg, FILE_APPEND);
-                        // ==================== DEBUG LOG END ======================
-
-                        $stmtUnassign = $pdo->prepare("
-                            UPDATE orders 
-                            SET assigned_truck_id = NULL, 
-                                assigned_at = NULL, 
-                                weight_loaded = NULL, 
-                                weight_remaining = weight_total 
-                            WHERE id = ?
-                        ");
-                        $stmtUnassign->execute([$oId]);
-                    }
+                if (OrderRepository::isClone($ord)) {
+                    $orderRepo->refundClone($ord);
+                    $orderRepo->deleteClone($oId);
+                } else {
+                    $orderRepo->releaseSingleOrder($oId);
+                }
 
                     // D. Den entladenen Schritt exklusiv in die Vorschlagskette dieses LKWs zurückschreiben
                     if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {

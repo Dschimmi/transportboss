@@ -1,6 +1,0 @@
-[2026-08-06 18:37:20] LOAD SPLIT: Order ID 72269 (IDN: IDN10964304) | Loaded 8 t on Truck 41 | Mother Remaining before: 15 t -> after: 7 t
-[2026-08-06 18:38:55] UNLOAD COMPLETE ORDER (Case B): Order ID 72424 (IDN: IDN10964304-1) | Unassigned from Truck 41 | Resetting weight_remaining to weight_total (15 t)
-[2026-08-06 18:41:06] UNLOAD COMPLETE ORDER (Case B): Order ID 72269 (IDN: IDN10964304) | Unassigned from Truck 26 | Resetting weight_remaining to weight_total (15 t)
-[2026-08-06 18:53:04] LOAD SPLIT: Order ID 72269 (IDN: IDN10964304) | Loaded 8 t on Truck 41 | Mother Remaining before: 15 t -> after: 7 t
-[2026-08-06 18:53:21] LOAD SPLIT: Order ID 72269 (IDN: IDN10964304) | Loaded 8 t on Truck 26 | Mother Remaining before: 7 t -> after: -1 t
-[2026-08-06 18:53:39] UNLOAD CLONE (Case A): Clone ID 72425 (IDN: IDN10964304-1) | Refunding 8 t to Mother ID 72269 | Mother WeightTotal: 15 t | Mother WeightRemaining: 0 t -> 8 t
