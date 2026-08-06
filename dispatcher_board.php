@@ -560,7 +560,11 @@ if ($focusTruck) {
                                 <span class="driver-unassigned">Unbesetzt</span>
                             <?php endif; ?>
                         </div>
-                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                        <?php if (!empty($truck['is_sofa'])): ?>
+                            <span class="badge-jobs-count text-orange" title="Sonderfahrt nach Freiburg: <?= htmlspecialchars($truck['sofa_reason'] ?? '') ?>">SoFa</span>
+                        <?php else: ?>
+                            <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Reihe 2 (Unten, kleiner): LKW ID, Typ & Kapazität, virtuelles Tourende / POS -->
@@ -636,6 +640,9 @@ if ($focusTruck) {
                         ?>
                         <h3 class="accent-text workspace-title">
                             Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
+                            <?php if (!empty($focusTruck['is_sofa'])): ?>
+                                <span class="text-orange" title="Sonderfahrt nach Freiburg aktiv">SoFa: <?= htmlspecialchars($focusTruck['sofa_reason'] ?? 'Aktiv') ?></span>
+                            <?php endif; ?>
                         </h3>
                         <table class="suggestion-table workspace-table">
                             <thead>
@@ -786,6 +793,30 @@ if ($focusTruck) {
                                             </td>
                                         </tr>';
                                         $currentCityId = $orderToId;
+                                    }
+
+                                    // Wenn SoFa aktiv ist und die Tour noch nicht in Freiburg endet -> Finale Transfer-Leerfahrt nach Freiburg anzeigen
+                                    if (!empty($focusTruck['is_sofa'])) {
+                                        $stmtFreiburg = $pdo->prepare("SELECT id, name FROM cities WHERE name = 'Freiburg' LIMIT 1");
+                                        $stmtFreiburg->execute();
+                                        $freiburgRow = $stmtFreiburg->fetch(PDO::FETCH_ASSOC);
+
+                                        if ($freiburgRow && (int)$freiburgRow['id'] !== $currentCityId) {
+                                            $finalEmptyDist = $distanceService->getDistance($currentCityId, (int)$freiburgRow['id']);
+                                            $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn() ?: 'Aktueller Ort';
+
+                                            echo '<tr class="row-type-empty">
+                                                <td>-</td>
+                                                <td class="text-warning-bold">SOFA-TRANSFER</td>
+                                                <td>-</td>
+                                                <td>-</td>
+                                                <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars((string)$fromCityName) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">Freiburg</span></td>
+                                                <td>' . $finalEmptyDist . ' km</td>
+                                                <td>-</td>
+                                                <td>0,00 €</td>
+                                                <td>-</td>
+                                            </tr>';
+                                        }
                                     }
                                 }
                                 ?>
