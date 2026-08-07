@@ -360,6 +360,27 @@ body {
     font-weight: bold !important;
 }
 
+/* Ausgegraute Vorschlagszeilen bei aktiver Sonderfahrt (WCAG AAA konform & scharf lesbar) */
+.row-sofa-disabled {
+    background-color: #1d1d1d !important;
+}
+table tr.row-sofa-disabled td,
+table tr.row-sofa-disabled td *,
+table tr.row-sofa-disabled td span,
+table tr.row-sofa-disabled td strong {
+    color: white !important;
+    opacity: 1 !important;
+    filter: none !important;
+}
+table tr.row-sofa-disabled button,
+table tr.row-sofa-disabled .btn-primary,
+.btn-disabled {
+    background-color: #3a3a3a !important;
+    border-color: #555555 !important;
+    color: white !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important;
+}
 
 /* ==========================================================================
    DISPATCHER BOARD: SPEZIFISCHES 3-SPALTEN WORKSPACE-DESIGN (PH 1.4.2)

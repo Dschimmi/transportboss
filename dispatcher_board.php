@@ -561,7 +561,7 @@ if ($focusTruck) {
                             <?php endif; ?>
                         </div>
                         <?php if (!empty($truck['is_sofa'])): ?>
-                            <span class="badge-jobs-count text-orange" title="Sonderfahrt nach Freiburg: <?= htmlspecialchars($truck['sofa_reason'] ?? '') ?>">SoFa</span>
+                            <span class="badge-jobs-count text-warning-bold" title="Sonderfahrt nach Freiburg: <?= htmlspecialchars($truck['sofa_reason'] ?? '') ?>">SoFa</span>
                         <?php else: ?>
                             <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
                         <?php endif; ?>
@@ -638,12 +638,14 @@ if ($focusTruck) {
                         $focusDriver = $driverMap[$focusTruck['assigned_driver_id']] ?? null;
                         $focusDriverName = $focusDriver ? htmlspecialchars($focusDriver['last_name'] . ', ' . substr($focusDriver['first_name'], 0, 1) . '.') : 'Unbesetzt';
                         ?>
-                        <h3 class="accent-text workspace-title">
-                            Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
+                        <div class="workspace-header-row" style="border-bottom: none; margin-bottom: 5px;">
+                            <h3 class="accent-text workspace-title" style="margin: 0;">
+                                Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
+                            </h3>
                             <?php if (!empty($focusTruck['is_sofa'])): ?>
-                                <span class="text-orange" title="Sonderfahrt nach Freiburg aktiv">SoFa: <?= htmlspecialchars($focusTruck['sofa_reason'] ?? 'Aktiv') ?></span>
+                                <span class="text-warning-bold" title="Sonderfahrt nach Freiburg aktiv">SoFa: <?= htmlspecialchars($focusTruck['sofa_reason'] ?? 'Aktiv') ?></span>
                             <?php endif; ?>
-                        </h3>
+                        </div>
                         <table class="suggestion-table workspace-table">
                             <thead>
                                 <tr>
@@ -869,16 +871,23 @@ if ($focusTruck) {
                                     if (!empty($suggestion['violates_weight_lock'])) {
                                         $rowClasses[] = 'row-type-empty'; // Rötliche Einfärbung zur Visualisierung der Warnung
                                     }
+                                    if (!empty($focusTruck['is_sofa'])) {
+                                        $rowClasses[] = 'row-sofa-disabled'; // Ausgrauen bei aktiver Sonderfahrt
+                                    }
                                     $rowClassStr = implode(' ', $rowClasses);
                                     ?>
                                     <tr class="<?php echo $rowClassStr; ?>">
                                         <td>
-                                            <!-- Laden-Button ganz links -->
-                                            <form method="post" action="load_job.php">
-                                                <input type="hidden" name="truck_id" value="<?php echo $focusTruck['id']; ?>">
-                                                <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
-                                                <button type="submit" class="btn-primary btn-load">Laden</button>
-                                            </form>
+                                            <!-- Laden-Button ganz links (gesperrt bei aktiver SoFa) -->
+                                            <?php if (!empty($focusTruck['is_sofa'])): ?>
+                                                <button type="button" class="btn-primary btn-load btn-disabled" disabled title="Sonderfahrt aktiv: Manuelles Laden gesperrt">Sperre</button>
+                                            <?php else: ?>
+                                                <form method="post" action="load_job.php">
+                                                    <input type="hidden" name="truck_id" value="<?php echo $focusTruck['id']; ?>">
+                                                    <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
+                                                    <button type="submit" class="btn-primary btn-load">Laden</button>
+                                                </form>
+                                            <?php endif; ?>
                                         </td>
                                         <td>
                                             <?php if (!empty($order['ingame_order_id'])): ?>
