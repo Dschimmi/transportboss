@@ -120,7 +120,7 @@ class TopologyEngine
         $stmtTrucks = $this->pdo->query("
             SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
             FROM trucks 
-            WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
+            WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL AND is_sofa = 0
         ");
         $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
 
@@ -206,11 +206,12 @@ class TopologyEngine
         $globalLimit = $limitStmt ? (int)$limitStmt->fetchColumn() : 26;
         $freeMarketSlots = max(0, $globalLimit - $warehouseCount);
 
-        $maxTotalSteps = count($activeTrucks) * 6;
         $marketOrdersCount = 0;
 
         // 5. Flottenweiter Proximity-Optimierungs-Loop (Autopilot)
-        for ($step = 0; $step < $maxTotalSteps; $step++) {
+        $hasMoreProposals = true;
+
+        while ($hasMoreProposals) {
             $bestCandidate = null;
             $bestTruckKey = null;
 
@@ -239,6 +240,15 @@ class TopologyEngine
 
                     // Nutzt das instanziierte distanceService-Objekt der Klasse
                     $emptyRunDist = $this->distanceService->getDistance($currentEndpoint, $op['from_city_id']);
+
+                    // Stufe 1: Strikte 3SR-Nachbarschaft | Stufe 2: Erweiterungszone unter 100 km Anfahrt
+                    $in3SR = in_array((int)$op['from_city_id'], $neighborhood, true);
+                    if (!$in3SR && $emptyRunDist >= 100) {
+                        continue; // Anfahrten ab 100 km ablehnen
+                    }
+
+                    // 3SR-Angebote erhalten Priorität vor 100km-Fallback-Angeboten
+                    $effectiveScore = $in3SR ? $emptyRunDist : ($emptyRunDist + 1000);
                     
                     // KORREKTUR: Berechnet die exakte proportionale Kilometer-Marge des LKW für diese Fahrt
                     $loadedWeight = min((int)$op['weight_remaining'], (int)$t['capacity_t']);
@@ -254,6 +264,7 @@ class TopologyEngine
                             'pool_index' => $index,
                             'order' => $op,
                             'empty_run_dist' => $emptyRunDist,
+                            'effective_score' => $effectiveScore,
                             'profitability' => $profitability
                         ];
                         $bestTruckKey = $truckKey;
@@ -268,10 +279,14 @@ class TopologyEngine
                 $orderToLoad = &$virtualOrderPool[$poolIndex];
 
                 $loadedWeight = self::calculateLoadedWeight((int)$orderToLoad['weight_remaining'], (int)$t['capacity_t']);
-                $isSplit = self::isSplitLoad($loadedWeight, (int)$orderToLoad['weight_remaining']);$isSplit = $orderToLoad['weight_remaining'] > (int)$t['capacity_t'];
+                $isSplit = self::isSplitLoad($loadedWeight, (int)$orderToLoad['weight_remaining']);
                 $availableWeight = (int)$orderToLoad['weight_remaining'];
 
                 $orderToLoad['weight_remaining'] -= $loadedWeight;
+
+                $suggestedStatus = (int)$orderToLoad['is_accepted'] === 1 
+                    ? 'warehouse' 
+                    : ((empty($orderToLoad['ingame_order_id']) && (int)$orderToLoad['weight_remaining'] < (int)$orderToLoad['weight_total']) ? 'partially_planned' : 'market');
 
                 $suggestedChains[$truckId][] = [
                     'order' => $orderToLoad,
@@ -279,7 +294,7 @@ class TopologyEngine
                     'available_weight' => (int)$orderToLoad['weight_remaining'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $bestCandidate['empty_run_dist'],
-                    'status' => (int)$orderToLoad['is_accepted'] === 1 ? 'warehouse' : 'market'
+                    'status' => $suggestedStatus
                 ];
 
                 $virtualEndpoints[$truckId] = $orderToLoad['to_city_id'];
@@ -379,7 +394,7 @@ class TopologyEngine
 
         // Fallback: Falls keine regionalen Vorschläge vorliegen
         if (empty($suggestions)) {
-            $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t']);
+            $fallbackOrders = $this->getFallbackSuggestions($truckId, $truck['vehicle_type'], $truck['capacity_t'], $currentCityId);
             foreach ($fallbackOrders as $fallbackOrder) {
                 // Tonnagen-Restriktionen für Fallback prüfen
                 if (!$this->isOrderAllowedByWeight($fallbackOrder, $truck, $allOwnedTrucks)) {
@@ -432,7 +447,7 @@ class TopologyEngine
             LIMIT $limit
         ");
         $stmt->execute(['city_id' => $cityId]);
-        return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'city_id');
+        return array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'city_id'));
     }
 
     /**
@@ -595,13 +610,15 @@ class TopologyEngine
      * @param int $capacity Die Kapazität des Fahrzeugs
      * @return array Array mit Fallback-Aufträgen
      */
-    private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity): array
+    private function getFallbackSuggestions(int $truckId, string $vehicleType, int $capacity, int $currentCityId = 0): array
     {
-        // Hole die aktuelle Position des LKW für den Distanzabgleich
-        $stmtTruckCity = $this->pdo->prepare("SELECT current_city_id FROM trucks WHERE id = ?");
-        $stmtTruckCity->execute([$truckId]);
-        $truckInfo = $stmtTruckCity->fetch(PDO::FETCH_ASSOC);
-        $currentCityId = $truckInfo ? (int)$truckInfo['current_city_id'] : 0;
+        // Falls kein virtuelles Tourende übergeben wurde, Fallback auf physischen Standort
+        if ($currentCityId <= 0) {
+            $stmtTruckCity = $this->pdo->prepare("SELECT current_city_id FROM trucks WHERE id = ?");
+            $stmtTruckCity->execute([$truckId]);
+            $truckInfo = $stmtTruckCity->fetch(PDO::FETCH_ASSOC);
+            $currentCityId = $truckInfo ? (int)$truckInfo['current_city_id'] : 0;
+        }
 
         $hasAdr = $this->hasAdrDriverForTruck($truckId);
         $compatibleTypes = $this->getCompatibleFreightTypes($vehicleType);
@@ -634,7 +651,6 @@ class TopologyEngine
             WHERE o.is_archived = 0
               AND o.weight_remaining > 0
               AND o.freight_type IN ($placeholdersStr)
-              AND o.weight_total <= :capacity
               AND (o.is_adr = 0 OR :has_adr = 1)
               AND o.assigned_truck_id IS NULL
             ORDER BY empty_run_dist ASC, (o.revenue / NULLIF(o.weight_total, 0)) DESC
@@ -730,14 +746,18 @@ class TopologyEngine
             $routeDistance = $this->distanceService->getDistance((int)$order['from_city_id'], (int)$order['to_city_id']);
             $tripYield = $proportionalRevenue / max(1, $routeDistance);
 
+            $orderStatus = (int)$order['is_accepted'] === 1 
+                ? 'warehouse' 
+                : ((empty($order['ingame_order_id']) && (int)$order['weight_remaining'] < (int)$order['weight_total']) ? 'partially_planned' : 'market');
+
             $radarScan[] = [
                 'order' => $order,
                 'loaded_weight' => $loadedWeight,
-                'available_weight' => (int)$order['weight_total'],
+                'available_weight' => (int)$order['weight_remaining'],
                 'is_split' => $isSplit,
                 'empty_run_dist' => $emptyRunDist,
                 'earning_per_tkm' => $tripYield, // Nutzt die LKW-spezifische Marge für das Sortierungs-Ranking
-                'status' => (int)$order['is_accepted'] === 1 ? 'warehouse' : 'market',
+                'status' => $orderStatus,
                 'radar_indicator' => $radarIndicator,
                 'violates_weight_lock' => $violatesWeightLock
             ];
@@ -745,7 +765,7 @@ class TopologyEngine
 
         // 4. DIE 3er-GARANTIE (PADDING)
         if (count($radarScan) < 3) {
-            $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity);
+            $fallbackOrders = $this->getFallbackSuggestions($truckId, $vehicleType, $capacity, $currentCityId);
             $existingIds = array_column(array_column($radarScan, 'order'), 'id');
 
             foreach ($fallbackOrders as $fallbackOrder) {
@@ -768,15 +788,19 @@ class TopologyEngine
                 $loadedWeight = self::calculateLoadedWeight((int)$fallbackOrder['weight_remaining'], $capacity);
                 $isSplit = self::isSplitLoad($loadedWeight, (int)$fallbackOrder['weight_remaining']);
 
+                $fallbackStatus = (int)$fallbackOrder['is_accepted'] === 1 
+                    ? 'warehouse' 
+                    : ((empty($fallbackOrder['ingame_order_id']) && (int)$fallbackOrder['weight_remaining'] < (int)$fallbackOrder['weight_total']) ? 'partially_planned' : 'market');
+
                 $radarScan[] = [
                     'order' => $fallbackOrder,
                     'loaded_weight' => $loadedWeight,
-                    'available_weight' => (int)$fallbackOrder['weight_total'],
+                    'available_weight' => (int)$fallbackOrder['weight_remaining'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $distanceToOrder,
                     'earning_per_tkm' => $fallbackOrder['revenue'] / ($fallbackOrder['weight_total'] * max($routeDistance, 1)),
                     'is_fallback' => true,
-                    'status' => $fallbackOrder['is_accepted'] ? 'warehouse' : 'market',
+                    'status' => $fallbackStatus,
                     'radar_indicator' => $this->simulateRadarChain((int)$fallbackOrder['to_city_id'], $truckId, $vehicleType, $capacity),
                     'violates_weight_lock' => $violatesWeightLock
                 ];

@@ -47,3 +47,48 @@ declare(strict_types=1);
         <a href="ranking_manager.php">Rangliste</a>
     </div>
 </nav>
+
+<!-- Globale Ein-Klick-Kopierfunktion mit dauerhafter Hervorhebung (PH § 1.4.5) -->
+<script>
+(function() {
+    let lastCopiedElement = null;
+
+    document.addEventListener('click', function(e) {
+        const target = e.target ? e.target.closest('.copy-city') : null;
+
+        if (target) {
+            let textToCopy = target.textContent.trim();
+
+            // 1. Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
+            if (textToCopy.startsWith('IDN') && textToCopy.includes('-')) {
+                textToCopy = textToCopy.split('-')[0];
+            }
+
+            // 2. Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
+            if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
+                textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
+                textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
+            }
+
+            // Native Zwischenablage-API nutzen
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                // Vorheriges kopiertes Element zurücksetzen
+                if (lastCopiedElement && lastCopiedElement !== target) {
+                    lastCopiedElement.classList.remove('copied-active');
+                }
+                // Neues Element dauerhaft hervorheben
+                target.classList.add('copied-active');
+                lastCopiedElement = target;
+            }).catch(err => {
+                // Geräuschloser Fallback
+            });
+        } else {
+            // Klick außerhalb eines Kopier-Elements: Letzte Hervorhebung zurücksetzen
+            if (lastCopiedElement && !e.target.closest('.copy-city')) {
+                lastCopiedElement.classList.remove('copied-active');
+                lastCopiedElement = null;
+            }
+        }
+    }, true); // Parameter true aktiviert Event Capturing vor stopPropagation()
+})();
+</script>

@@ -299,6 +299,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $_SESSION['pb_fleet_message_class'] = "status-success";
         }
 
+        // 7. Sonderfahrt (SoFa nach Freiburg) auslösen oder beenden
+        elseif ($action === 'initiate_sofa') {
+            $truckId = (int)$_POST['truck_id'];
+            $reason = trim($_POST['sofa_reason'] ?? '');
+            if ($reason === '') {
+                $reason = 'Betrieblich veranlasste Überführung nach Freiburg';
+            }
+
+            require_once 'classes/DistanceService.php';
+            require_once 'classes/OrderRepository.php';
+            require_once 'classes/SofaService.php';
+
+            $sofaService = new SofaService($pdo, new DistanceService($pdo), new OrderRepository($pdo));
+            $res = $sofaService->initiateSofa($truckId, $reason);
+
+            $_SESSION['pb_fleet_message'] = $res['message'];
+            $_SESSION['pb_fleet_message_class'] = $res['success'] ? "status-success" : "status-error";
+        }
+        elseif ($action === 'cancel_sofa') {
+            $truckId = (int)$_POST['truck_id'];
+
+            require_once 'classes/DistanceService.php';
+            require_once 'classes/OrderRepository.php';
+            require_once 'classes/SofaService.php';
+
+            $sofaService = new SofaService($pdo, new DistanceService($pdo), new OrderRepository($pdo));
+            $sofaService->cancelSofa($truckId);
+
+            $_SESSION['pb_fleet_message'] = "Sonderfahrt nach Freiburg für dieses Fahrzeug beendet.";
+            $_SESSION['pb_fleet_message_class'] = "status-success";
+        }
+
         header("Location: " . $redirectUrl);
         exit;
 
@@ -518,6 +550,20 @@ $marketVehicles = $pdo->query("
                             </td>
                             <td>
                                 <div class="action-form">
+                                    <?php if (!empty($truck['is_sofa'])): ?>
+                                        <form method="post">
+                                            <input type="hidden" name="action" value="cancel_sofa">
+                                            <input type="hidden" name="truck_id" value="<?= $truck['id'] ?>">
+                                            <button type="submit" class="btn-primary btn-danger btn-small" title="SoFa Grund: <?= htmlspecialchars($truck['sofa_reason'] ?? '') ?>">SoFa beenden</button>
+                                        </form>
+                                    <?php else: ?>
+                                        <form method="post" onsubmit="let r=prompt('Grund für die Sonderfahrt nach Freiburg eingeben:'); if(!r || !r.trim()){return false;} this.sofa_reason.value=r;">
+                                            <input type="hidden" name="action" value="initiate_sofa">
+                                            <input type="hidden" name="truck_id" value="<?= $truck['id'] ?>">
+                                            <input type="hidden" name="sofa_reason" value="">
+                                            <button type="submit" class="btn-primary btn-small">SoFa ➔ Freiburg</button>
+                                        </form>
+                                    <?php endif; ?>
                                     <a href="edit_entity.php?type=truck&id=<?= $truck['id'] ?>" class="btn-primary btn-small">Manuelle Korrektur</a>
                                     <form method="post" onsubmit="return confirm('Fahrzeug wirklich verkaufen? Sämtliche Daten werden permanent entfernt.');">
                                         <input type="hidden" name="action" value="sell_truck">

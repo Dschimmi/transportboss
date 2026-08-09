@@ -139,39 +139,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $pdo->beginTransaction();
         try {
             foreach ($affectedOrders as $ord) {
-                    $oId = (int)$ord['id'];
-                    $idn = $ord['ingame_order_id'];
-                    $loadedWeight = (int)($ord['weight_loaded'] ?? $ord['weight_remaining']);
+                $oId = (int)$ord['id'];
 
-                    // DB-Check: Existiert ein unverplanter Mutter-Auftrag im Lager/Pool?
-                    if ($idn !== null && str_contains($idn, '-')) {
-                        $motherStmt = $pdo->prepare("SELECT id FROM orders WHERE ingame_order_id = ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
-                        $motherStmt->execute([explode('-', $idn)[0]]);
-                    } else {
-                        $motherStmt = $pdo->prepare("SELECT id FROM orders WHERE fingerprint = ? AND id != ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
-                        $motherStmt->execute([$ord['fingerprint'], $oId]);
-                    }
-                    $motherId = $motherStmt->fetchColumn();
-
-                    if ($motherId !== false) {
-                        // A. Klon: Tonnage auf Mutter-Auftrag buchen und Klon löschen
-                        $stmtRefund = $pdo->prepare("UPDATE orders SET weight_remaining = weight_remaining + ? WHERE id = ?");
-                        $stmtRefund->execute([$loadedWeight, (int)$motherId]);
-
-                        $stmtDelete = $pdo->prepare("DELETE FROM orders WHERE id = ?");
-                        $stmtDelete->execute([$oId]);
-                    } else {
-                        // B. Ungeteilter Komplettauftrag: Zurück ins Lager/Pool stellen
-                        $stmtUnassign = $pdo->prepare("
-                            UPDATE orders 
-                            SET assigned_truck_id = NULL, 
-                                assigned_at = NULL, 
-                                weight_loaded = NULL, 
-                                weight_remaining = weight_total 
-                            WHERE id = ?
-                        ");
-                        $stmtUnassign->execute([$oId]);
-                    }
+                if (OrderRepository::isClone($ord)) {
+                    $orderRepo->refundClone($ord);
+                    $orderRepo->deleteClone($oId);
+                } else {
+                    $orderRepo->releaseSingleOrder($oId);
+                }
 
                     // D. Den entladenen Schritt exklusiv in die Vorschlagskette dieses LKWs zurückschreiben
                     if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
@@ -185,7 +160,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             $totW = (int)$pObj['weight_total'];
                             $pIngameId = $pObj['ingame_order_id'];
                             $pStatus = ((int)$pObj['is_accepted'] === 1) ? 'warehouse' : ((empty($pIngameId) && $remW < $totW) ? 'partially_planned' : 'market');
-                            $emptyRun = $distanceService->getDistance((int)$truckInfo['current_city_id'], (int)$pObj['from_city_id']);
+
+                            // Verbleibendes Tourende des LKWs nach dem Entladen ermitteln
+                            $lastCityStmt = $pdo->prepare("SELECT to_city_id FROM orders WHERE assigned_truck_id = ? AND is_archived = 0 ORDER BY assigned_at DESC LIMIT 1");
+                            $lastCityStmt->execute([$truckId]);
+                            $remainingTourEnd = $lastCityStmt->fetchColumn();
+                            $effectiveStartCity = $remainingTourEnd ? (int)$remainingTourEnd : (int)$truckInfo['current_city_id'];
+
+                            $emptyRun = $distanceService->getDistance($effectiveStartCity, (int)$pObj['from_city_id']);
 
                             array_unshift($_SESSION['tb_suggested_chains'][$truckId], [
                                 'order' => $pObj,
@@ -251,6 +233,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 // "Leerfahrt beendet"-Aktion (LKW-Standort manuell auf Ankunfts-Stadt der Leerfahrt aktualisieren)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'complete_empty_run') {
+    $truckId = (int)$_POST['truck_id'];
+    $targetCityId = (int)$_POST['target_city_id'];
+
+    if ($truckId > 0 && $targetCityId > 0) {
+        $stmtUpdateTruck = $pdo->prepare("UPDATE trucks SET current_city_id = ? WHERE id = ?");
+        $stmtUpdateTruck->execute([$targetCityId, $truckId]);
+    }
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
+// "SoFa-Transfer beendet"-Aktion (Setzt Standort auf Freiburg, behält SoFa-Status & Grund für Sicherheit bei!)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'complete_sofa_transfer') {
     $truckId = (int)$_POST['truck_id'];
     $targetCityId = (int)$_POST['target_city_id'];
 
@@ -578,7 +573,11 @@ if ($focusTruck) {
                                 <span class="driver-unassigned">Unbesetzt</span>
                             <?php endif; ?>
                         </div>
-                        <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                        <?php if (!empty($truck['is_sofa'])): ?>
+                            <span class="badge-jobs-count text-warning-bold" title="Sonderfahrt nach Freiburg: <?= htmlspecialchars($truck['sofa_reason'] ?? '') ?>">SoFa</span>
+                        <?php else: ?>
+                            <span class="badge-jobs-count"><?= $truck['job_count'] ?? 0 ?> Jobs</span>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Reihe 2 (Unten, kleiner): LKW ID, Typ & Kapazität, virtuelles Tourende / POS -->
@@ -652,9 +651,14 @@ if ($focusTruck) {
                         $focusDriver = $driverMap[$focusTruck['assigned_driver_id']] ?? null;
                         $focusDriverName = $focusDriver ? htmlspecialchars($focusDriver['last_name'] . ', ' . substr($focusDriver['first_name'], 0, 1) . '.') : 'Unbesetzt';
                         ?>
-                        <h3 class="accent-text workspace-title">
-                            Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
-                        </h3>
+                        <div class="workspace-header-row" style="border-bottom: none; margin-bottom: 5px;">
+                            <h3 class="accent-text workspace-title" style="margin: 0;">
+                                Geplante Tour: <?= $focusDriverName ?> - <?= htmlspecialchars($focusTruck['vehicle_type']) ?> (<?= $focusTruck['capacity_t'] ?>t)
+                            </h3>
+                            <?php if (!empty($focusTruck['is_sofa'])): ?>
+                                <span class="text-warning-bold" title="Sonderfahrt nach Freiburg aktiv">SoFa: <?= htmlspecialchars($focusTruck['sofa_reason'] ?? 'Aktiv') ?></span>
+                            <?php endif; ?>
+                        </div>
                         <table class="suggestion-table workspace-table">
                             <thead>
                                 <tr>
@@ -805,6 +809,37 @@ if ($focusTruck) {
                                         </tr>';
                                         $currentCityId = $orderToId;
                                     }
+
+                                    // Wenn SoFa aktiv ist und die Tour noch nicht in Freiburg endet -> Finale Transfer-Leerfahrt nach Freiburg anzeigen
+                                    if (!empty($focusTruck['is_sofa'])) {
+                                        $stmtFreiburg = $pdo->prepare("SELECT id, name FROM cities WHERE name = 'Freiburg' LIMIT 1");
+                                        $stmtFreiburg->execute();
+                                        $freiburgRow = $stmtFreiburg->fetch(PDO::FETCH_ASSOC);
+
+                                        if ($freiburgRow && (int)$freiburgRow['id'] !== $currentCityId) {
+                                            $finalEmptyDist = $distanceService->getDistance($currentCityId, (int)$freiburgRow['id']);
+                                            $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn() ?: 'Aktueller Ort';
+
+                                            echo '<tr class="row-type-empty">
+                                                <td>
+                                                    <form method="post" class="inline-form">
+                                                        <input type="hidden" name="action" value="complete_sofa_transfer">
+                                                        <input type="hidden" name="target_city_id" value="' . (int)$freiburgRow['id'] . '">
+                                                        <input type="hidden" name="truck_id" value="' . $focusTruck['id'] . '">
+                                                        <button type="submit" class="btn-primary btn-complete">Erledigt</button>
+                                                    </form>
+                                                </td>
+                                                <td class="text-warning-bold">SOFA-TRANSFER</td>
+                                                <td>-</td>
+                                                <td>-</td>
+                                                <td><span class="copy-city" title="Klicken zum Kopieren">' . htmlspecialchars((string)$fromCityName) . '</span> ➔ <span class="copy-city" title="Klicken zum Kopieren">Freiburg</span></td>
+                                                <td>' . $finalEmptyDist . ' km</td>
+                                                <td>-</td>
+                                                <td>0,00 €</td>
+                                                <td>-</td>
+                                            </tr>';
+                                        }
+                                    }
                                 }
                                 ?>
                             </tbody>
@@ -856,16 +891,23 @@ if ($focusTruck) {
                                     if (!empty($suggestion['violates_weight_lock'])) {
                                         $rowClasses[] = 'row-type-empty'; // Rötliche Einfärbung zur Visualisierung der Warnung
                                     }
+                                    if (!empty($focusTruck['is_sofa'])) {
+                                        $rowClasses[] = 'row-sofa-disabled'; // Ausgrauen bei aktiver Sonderfahrt
+                                    }
                                     $rowClassStr = implode(' ', $rowClasses);
                                     ?>
                                     <tr class="<?php echo $rowClassStr; ?>">
                                         <td>
-                                            <!-- Laden-Button ganz links -->
-                                            <form method="post" action="load_job.php">
-                                                <input type="hidden" name="truck_id" value="<?php echo $focusTruck['id']; ?>">
-                                                <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
-                                                <button type="submit" class="btn-primary btn-load">Laden</button>
-                                            </form>
+                                            <!-- Laden-Button ganz links (gesperrt bei aktiver SoFa) -->
+                                            <?php if (!empty($focusTruck['is_sofa'])): ?>
+                                                <button type="button" class="btn-primary btn-load btn-disabled" disabled title="Sonderfahrt aktiv: Manuelles Laden gesperrt">Sperre</button>
+                                            <?php else: ?>
+                                                <form method="post" action="load_job.php">
+                                                    <input type="hidden" name="truck_id" value="<?php echo $focusTruck['id']; ?>">
+                                                    <input type="hidden" name="order_id" value="<?php echo $order['id']; ?>">
+                                                    <button type="submit" class="btn-primary btn-load">Laden</button>
+                                                </form>
+                                            <?php endif; ?>
                                         </td>
                                         <td>
                                             <?php if (!empty($order['ingame_order_id'])): ?>
@@ -913,7 +955,7 @@ if ($focusTruck) {
                                                 ?>
                                             </td>
                                         <?php endif; ?>
-                                        <td class="status-<?php echo $suggestion['status']; ?>">
+                                        <td class="status-<?php echo str_replace('_', '-', $suggestion['status']); ?>">
                                             <?php 
                                             if (($suggestion['status'] ?? '') === 'warehouse') {
                                                 echo 'LAGER';
@@ -1020,41 +1062,6 @@ if ($focusTruck) {
                 }
             });
         }
-        // --- Live-Kopieren von Städtenamen, IDNs und konvertierten Geldbeträgen (PH § 1.4.5) ---
-        ['.detail-top-half', '.detail-bottom-half'].forEach(selector => {
-            const container = document.querySelector(selector);
-            if (container) {
-                container.addEventListener('click', function(e) {
-                    if (e.target && e.target.classList.contains('copy-city')) {
-                        let textToCopy = e.target.textContent.trim();
-                        
-                        // 1. Suffix (-1, -2 etc.) bei IDN-Nummern vor dem Kopieren abschneiden
-                        if (textToCopy.startsWith('IDN') && textToCopy.includes('-')) {
-                            textToCopy = textToCopy.split('-')[0];
-                        }
-                        
-                        // 2. Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
-                        if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
-                            // Währungssymbole und Whitespaces entfernen
-                            textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
-                            // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
-                            textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
-                        }
-                        
-                        // Native Zwischenablage-API nutzen
-                        navigator.clipboard.writeText(textToCopy).then(() => {
-                            // Visuelles Erfolgs-Feedback (Flasht kurz orange)
-                            e.target.classList.add('text-orange');
-                            setTimeout(() => {
-                                e.target.classList.remove('text-orange');
-                            }, 500);
-                        }).catch(err => {
-                            // Geräuschloser Fallback
-                        });
-                    }
-                });
-            }
-        });
     </script>
 </body>
 </html>

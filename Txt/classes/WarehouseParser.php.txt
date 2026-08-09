@@ -108,6 +108,11 @@ class WarehouseParser
                 $rawToCity = trim($cols[4]);
                 $toCityName = $this->cleanCountryPrefix($rawToCity);
 
+                // Validierung an der Wurzel: Müllzeilen (IDNs, Währungen) sofort verwerfen
+                if (!\CityService::isValidCityName($fromCityName) || !\CityService::isValidCityName($toCityName)) {
+                    continue;
+                }
+
                 // Spalte 5: Erlös (z. B. "1,070.23")
                 $rawRevenue = trim($cols[5]);
                 // Stufe 1 & 2 der Geldlogik

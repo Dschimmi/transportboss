@@ -60,7 +60,7 @@ class OrdersViewController
         $averages = [];
         $stmt = $this->pdo->query("
             SELECT 
-                o.commodity,
+                o.freight_type,
                 AVG(o.revenue / d.distance_km) AS avg_per_km
             FROM orders o
             JOIN distances d ON (
@@ -69,12 +69,12 @@ class OrdersViewController
             )
             WHERE o.is_archived = 1 
               AND d.distance_km > 0
-            GROUP BY o.commodity
+            GROUP BY o.freight_type
         ");
 
         if ($stmt) {
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $averages[$row['commodity']] = (float)$row['avg_per_km'];
+                $averages[$row['freight_type']] = (float)$row['avg_per_km'];
             }
         }
         return $averages;
@@ -145,9 +145,9 @@ class OrdersViewController
             $currentKmRate = $effectiveKm > 0 ? (float)$order['revenue'] / $effectiveKm : 0.0;
             $order['eur_per_km'] = $currentKmRate;
 
-            // Marge-Ratio im Vergleich zum historischen Durchschnitt bestimmen
-            $commodity = $order['commodity'];
-            $avgKmRate = isset($historicalAverages[$commodity]) ? $historicalAverages[$commodity] : $globalAvg;
+            // Marge-Ratio im Vergleich zum historischen Durchschnitt der LKW-Kategorie bestimmen
+            $freightType = $order['freight_type'];
+            $avgKmRate = isset($historicalAverages[$freightType]) ? $historicalAverages[$freightType] : $globalAvg;
 
             $ratio = $avgKmRate > 0 ? $currentKmRate / $avgKmRate : 1.0;
 
@@ -541,32 +541,6 @@ $normalizeFreight = function(string $type): string {
 
             rows.forEach(row => tbody.appendChild(row));
         }
-
-        // --- Live-Kopieren von Frachterlösen in US-Schreibweise (PH § 1.4.5) ---
-        document.addEventListener('click', function(e) {
-            if (e.target && e.target.classList.contains('copy-city')) {
-                let textToCopy = e.target.textContent.trim();
-                
-                // Deutsches Währungsformat (z.B. "3.407,94 €") in US-Such-Format ("3,407.94") konvertieren
-                if (/[0-9]/.test(textToCopy) && textToCopy.includes(',')) {
-                    // Währungssymbole und Whitespaces entfernen
-                    textToCopy = textToCopy.replace(/[^\d.,-]/g, '');
-                    // Tausenderpunkt mit Platzhalter vertauschen, Dezimalkomma zu Punkt, Platzhalter zu Komma
-                    textToCopy = textToCopy.split('.').join('TEMP').replace(',', '.').split('TEMP').join(',');
-                }
-                
-                // Native Zwischenablage-API nutzen
-                navigator.clipboard.writeText(textToCopy).then(() => {
-                    // Visuelles Erfolgs-Feedback (Flasht kurz orange)
-                    e.target.classList.add('text-orange');
-                    setTimeout(() => {
-                        e.target.classList.remove('text-orange');
-                    }, 500);
-                }).catch(err => {
-                    // Geräuschloser Fallback
-                });
-            }
-        });
     </script>
 </body>
 </html>

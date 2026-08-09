@@ -114,6 +114,17 @@ class SofaService
 
             $currentPos = $bestCityId;
 
+            // A*-Suchknoten für die Graphensuche nach Freiburg
+            $queue = [[
+                'pos' => $currentPos,
+                'hops' => $hopCount,
+                'path' => [],
+                'cost' => $this->distanceService->getDistance($currentPos, $freiburgId)
+            ]];
+
+            $bestPath = null;
+            $minCostFound = 999999;
+
             // Alle freien LAGER-Aufträge laden (is_accepted = 1), OHNE Tonnage-Sperren & OHNE 3SR!
             $stmtWarehouse = $this->pdo->query("
                 SELECT o.* 
@@ -125,45 +136,32 @@ class SofaService
             ");
             $allWarehouseOrders = $stmtWarehouse->fetchAll(PDO::FETCH_ASSOC);
 
-            // A*-Suchknoten für die Graphensuche nach Freiburg
-            $initialDist = $this->distanceService->getDistance($currentPos, $freiburgId);
-            $minCostFound = $initialDist;
-            $bestPath = [];
-
-            $queue = [[
-                'pos' => $currentPos,
-                'hops' => $hopCount,
-                'path' => [],
-                'used_ids' => [],
-                'cost' => 0
-            ]];
-
             while (!empty($queue)) {
-                // Besten Knoten nach geschätzten Gesamtkosten auswählen
+                // Besten Knoten nach geschätzten Gesamtkosten auswählen (A* Heuristik)
                 usort($queue, fn($a, $b) => $a['cost'] <=> $b['cost']);
                 $node = array_shift($queue);
 
-                $nodePos = (int)$node['pos'];
-                $nodeHops = (int)$node['hops'];
+                $nodePos = $node['pos'];
+                $nodeHops = $node['hops'];
                 $nodePath = $node['path'];
-                $nodeUsedIds = $node['used_ids'];
-                $nodeCost = (int)$node['cost'];
                 $distToFreiburg = $this->distanceService->getDistance($nodePos, $freiburgId);
 
-                // Ziel bereits an diesem Knoten erreicht
+                // Ziel erreicht: Fahrzeug steht in Freiburg!
                 if ($distToFreiburg === 0) {
-                    continue;
+                    if ($node['cost'] < $minCostFound) {
+                        $minCostFound = $node['cost'];
+                        $bestPath = $nodePath;
+                    }
+                    break;
                 }
 
                 if ($nodeHops >= 5) {
                     continue; // Max. 5 Hops erreicht
                 }
 
-                // Passende Lageraufträge einbinden
+                // Zweig 1: Passende Lageraufträge einbinden
+                $foundAnyOrder = false;
                 foreach ($allWarehouseOrders as $cand) {
-                    $candId = (int)$cand['id'];
-                    if (in_array($candId, $nodeUsedIds, true)) continue;
-
                     if (!TopologyEngine::isTypeCompatible($cand['freight_type'], $vehicleType)) continue;
                     if ((int)$cand['is_adr'] === 1 && !$driverHasAdr) continue;
 
@@ -174,30 +172,26 @@ class SofaService
 
                     // Nur Aufträge zulassen, die Anfahrt sparen und näher nach Freiburg führen
                     if ($emptyRun < $distToFreiburg && $candRest < $distToFreiburg) {
-                        $newCost = $nodeCost + $emptyRun;
-                        $estimatedTotal = $newCost + $candRest;
+                        $newCost = $node['cost'] + $emptyRun;
+                        $newPath = $nodePath;
+                        $newPath[] = $cand;
 
-                        // Pruning: Wenn der geschätzte Gesamtweg schlechter oder gleich dem bisher besten ist, verwerfen
-                        if ($estimatedTotal >= $minCostFound) {
-                            continue;
-                        }
+                        $queue[] = [
+                            'pos' => $candTo,
+                            'hops' => $nodeHops + 1,
+                            'path' => $newPath,
+                            'cost' => $newCost + $candRest
+                        ];
+                        $foundAnyOrder = true;
+                    }
+                }
 
-                        $newPath = array_merge($nodePath, [$cand]);
-                        $newUsedIds = array_merge($nodeUsedIds, [$candId]);
-
-                        // Bisher besten Pfad aktualisieren
-                        $minCostFound = $estimatedTotal;
-                        $bestPath = $newPath;
-
-                        if ($nodeHops + 1 < 5) {
-                            $queue[] = [
-                                'pos' => $candTo,
-                                'hops' => $nodeHops + 1,
-                                'path' => $newPath,
-                                'used_ids' => $newUsedIds,
-                                'cost' => $newCost
-                            ];
-                        }
+                // Zweig 2: Falls kein Lagerauftrag weiterführt -> Direkter Transfer nach Freiburg
+                if (!$foundAnyOrder) {
+                    $transferCost = $node['cost'] + $distToFreiburg;
+                    if ($transferCost < $minCostFound) {
+                        $minCostFound = $transferCost;
+                        $bestPath = $nodePath;
                     }
                 }
             }

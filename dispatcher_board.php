@@ -244,6 +244,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// "SoFa-Transfer beendet"-Aktion (Setzt Standort auf Freiburg, behält SoFa-Status & Grund für Sicherheit bei!)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'complete_sofa_transfer') {
+    $truckId = (int)$_POST['truck_id'];
+    $targetCityId = (int)$_POST['target_city_id'];
+
+    if ($truckId > 0 && $targetCityId > 0) {
+        $stmtUpdateTruck = $pdo->prepare("UPDATE trucks SET current_city_id = ? WHERE id = ?");
+        $stmtUpdateTruck->execute([$targetCityId, $truckId]);
+    }
+    header("Location: dispatcher_board.php?focus_truck_id=$focusTruckId");
+    exit;
+}
+
 // Archivieren von "Geisteraufträgen"
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'archive_pool_order') {
     $orderId = (int)$_POST['order_id'];
@@ -447,11 +460,19 @@ if ($focusTruck) {
     $virtualStartCityId = $lastOrderCity ? (int)$lastOrderCity : (int)$focusTruck['current_city_id'];
 
     if ($planningMode === 'radar') {
-        // Taktisches Radar: Wir rufen getRadarScanForTruck auf
+        // Taktisches Radar: Direkt-Anforderung für das fokussierte Fahrzeug
         $focusSuggestions = $topologyEngine->getRadarScanForTruck((int)$focusTruck['id'], $virtualStartCityId);
     } else {
-        // Autopilot: Wir greifen auf die im Speicher berechnete globale Kette zurück
+        // Autopilot: Primär auf die im Speicher berechnete globale Kette zugreifen
         $focusSuggestions = $suggestedChains[$focusTruck['id']] ?? [];
+        
+        // ON-DEMAND-GENERIERUNG FÜR DAS FOKUSSIERTE FAHRZEUG:
+        // Falls für diesen LKW im Autopilot noch keine Kette vorliegt (z. B. weil is_active_planning = 0 war),
+        // berechnen wir jetzt gezielt eine Vorschlagskette für dieses einzelne Fahrzeug!
+        if (empty($focusSuggestions) && !empty($focusTruck['assigned_driver_id'])) {
+            $singleChain = $topologyEngine->calculateAutopilotChains((int)$focusTruck['id']);
+            $focusSuggestions = $singleChain[$focusTruck['id']] ?? [];
+        }
     }
 }
 ?>
@@ -786,29 +807,40 @@ if ($focusTruck) {
                                             <td><span title="L = ' . ($order['weight_loaded'] ?? $order['weight_remaining']) . 't (Geladen) | A = ' . $currentWarehouseRest . 't (Verfügbar beim Laden) | U = ' . (int)$order['weight_total'] . 't (Ursprünglich gesamt)"><strong>' . ($order['weight_loaded'] ?? $order['weight_remaining']) . '</strong> / ' . $currentWarehouseRest . ' / ' . (int)$order['weight_total'] . ' t</span></td>
                                             <td>' . number_format((float)$order['revenue'], 2, ',', '.') . ' €</td>
                                             <td>
-                                                <!-- Entladen-Button ganz rechts -->
-                                                <form method="post" class="inline-form" onsubmit="return confirm(\'Auftrag wirklich entladen?\')">
-                                                    <input type="hidden" name="action" value="unload_job">
-                                                    <input type="hidden" name="order_id" value="' . $order['id'] . '">
-                                                    <button type="submit" class="btn-primary btn-danger btn-unload">Entladen</button>
-                                                </form>
+                                                <!-- Entladen-Button ganz rechts (gesperrt bei aktiver SoFa) -->
+                                                ' . (!empty($focusTruck['is_sofa'])
+                                                    ? '<button type="button" class="btn-primary btn-unload btn-disabled" disabled title="Sonderfahrt aktiv: Manuelle Disposition gesperrt!">Sperre</button>'
+                                                    : '<form method="post" class="inline-form" onsubmit="return confirm(\'Auftrag wirklich entladen?\')">
+                                                        <input type="hidden" name="action" value="unload_job">
+                                                        <input type="hidden" name="order_id" value="' . $order['id'] . '">
+                                                        <button type="submit" class="btn-primary btn-danger btn-unload">Entladen</button>
+                                                    </form>'
+                                                ) . '
                                             </td>
                                         </tr>';
                                         $currentCityId = $orderToId;
                                     }
 
-                                    // Wenn SoFa aktiv ist und die Tour noch nicht in Freiburg endet -> Finale Transfer-Leerfahrt nach Freiburg anzeigen
+                                    // Wenn SoFa aktiv ist -> SoFa-Transfer-Hinweis dauerhaft anzeigen, solange Status SoFa gesetzt ist
                                     if (!empty($focusTruck['is_sofa'])) {
                                         $stmtFreiburg = $pdo->prepare("SELECT id, name FROM cities WHERE name = 'Freiburg' LIMIT 1");
                                         $stmtFreiburg->execute();
                                         $freiburgRow = $stmtFreiburg->fetch(PDO::FETCH_ASSOC);
 
-                                        if ($freiburgRow && (int)$freiburgRow['id'] !== $currentCityId) {
-                                            $finalEmptyDist = $distanceService->getDistance($currentCityId, (int)$freiburgRow['id']);
+                                        if ($freiburgRow) {
+                                            $freiburgId = (int)$freiburgRow['id'];
+                                            $finalEmptyDist = $distanceService->getDistance($currentCityId, $freiburgId);
                                             $fromCityName = $pdo->query("SELECT name FROM cities WHERE id = $currentCityId")->fetchColumn() ?: 'Aktueller Ort';
 
                                             echo '<tr class="row-type-empty">
-                                                <td>-</td>
+                                                <td>
+                                                    <form method="post" class="inline-form">
+                                                        <input type="hidden" name="action" value="complete_sofa_transfer">
+                                                        <input type="hidden" name="target_city_id" value="' . $freiburgId . '">
+                                                        <input type="hidden" name="truck_id" value="' . $focusTruck['id'] . '">
+                                                        <button type="submit" class="btn-primary btn-complete">Erledigt</button>
+                                                    </form>
+                                                </td>
                                                 <td class="text-warning-bold">SOFA-TRANSFER</td>
                                                 <td>-</td>
                                                 <td>-</td>
@@ -1016,11 +1048,36 @@ if ($focusTruck) {
                 row.style.display = match ? '' : 'none';
             });
         });
-        // --- Live LKW-Filtersteuerung für die Fuhrpark-Spalte ---
+        // --- State-Persistenz für die LKW-Suche ---
+        function saveTruckSearchState(query) {
+            if (query && query.trim() !== '') {
+                localStorage.setItem('tb_truck_search_query', query);
+            } else {
+                localStorage.removeItem('tb_truck_search_query');
+            }
+        }
+
+        function restoreTruckSearchState() {
+            const savedQuery = localStorage.getItem('tb_truck_search_query');
+            const searchInput = document.getElementById('truckSearch');
+            if (savedQuery && searchInput) {
+                searchInput.value = savedQuery;
+            }
+        }
+
+        // --- Live LKW-Filtersteuerung & Auto-Fokus bei Einzel-Treffer ---
         function applyTruckFilter() {
-            const query = document.getElementById('truckSearch').value.toLowerCase();
+            const searchInput = document.getElementById('truckSearch');
+            if (!searchInput) return;
+
+            const query = searchInput.value.toLowerCase();
             const keywords = query.split(/\s+/).filter(k => k.trim() !== '');
             const buttons = document.querySelectorAll('.truck-btn');
+
+            // Aktuellen Suchbegriff im localStorage sichern
+            saveTruckSearchState(searchInput.value);
+
+            let visibleButtons = [];
 
             buttons.forEach(btn => {
                 const text = btn.textContent.toLowerCase();
@@ -1034,14 +1091,34 @@ if ($focusTruck) {
                     }
                 }
                 
-                // Setzt die CSS-Anzeige-Eigenschaft zurück oder schaltet sie ab (Sicherheits-Integrität)
+                // Sichtbarkeit steuern und Treffer für die Auto-Fokus-Messung sammeln
                 if (match) {
                     btn.style.setProperty('display', 'flex', 'important');
+                    visibleButtons.push(btn);
                 } else {
                     btn.style.setProperty('display', 'none', 'important');
                 }
             });
+
+            // AUTO-FOKUS LOGIK:
+            // Wenn die Suchergebnis-Liste auf exakt ein einziges Fahrzeug zusammengeschrumpft ist,
+            // setzen wir automatisch den Fokus auf diesen LKW (falls er nicht bereits fokussiert ist).
+            if (visibleButtons.length === 1 && keywords.length > 0) {
+                const singleBtn = visibleButtons[0];
+                const matchId = singleBtn.id ? singleBtn.id.replace('truck-', '') : null;
+                const currentFocusId = "<?= (string)$focusTruckId ?>";
+
+                if (matchId && matchId !== currentFocusId) {
+                    selectTruck(matchId);
+                }
+            }
         }
+
+        // Beim Laden der Seite Suchzustand wiederherstellen und Filter ausführen
+        window.addEventListener('DOMContentLoaded', () => {
+            restoreTruckSearchState();
+            applyTruckFilter();
+        });
     </script>
 </body>
 </html>

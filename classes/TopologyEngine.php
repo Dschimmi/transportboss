@@ -114,15 +114,25 @@ class TopologyEngine
      *
      * @return array Assoziatives Array der Ketten [truck_id => [chain_steps]]
      */
-    public function calculateAutopilotChains(): array
+    public function calculateAutopilotChains(?int $singleTruckId = null): array
     {
-        // 1. Alle für die Disposition aktivierten Fahrzeuge laden
-        $stmtTrucks = $this->pdo->query("
-            SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
-            FROM trucks 
-            WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
-        ");
-        $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+        // 1. Alle für die Disposition aktivierten Fahrzeuge laden (oder Einzelfahrzeug bei Fokus)
+        if ($singleTruckId !== null) {
+            $stmtTrucks = $this->pdo->prepare("
+                SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
+                FROM trucks 
+                WHERE id = ? AND assigned_driver_id IS NOT NULL
+            ");
+            $stmtTrucks->execute([$singleTruckId]);
+            $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $stmtTrucks = $this->pdo->query("
+                SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
+                FROM trucks 
+                WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL AND is_sofa = 0
+            ");
+            $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         if (empty($activeTrucks)) {
             return [];
@@ -206,11 +216,12 @@ class TopologyEngine
         $globalLimit = $limitStmt ? (int)$limitStmt->fetchColumn() : 26;
         $freeMarketSlots = max(0, $globalLimit - $warehouseCount);
 
-        $maxTotalSteps = count($activeTrucks) * 6;
         $marketOrdersCount = 0;
 
         // 5. Flottenweiter Proximity-Optimierungs-Loop (Autopilot)
-        for ($step = 0; $step < $maxTotalSteps; $step++) {
+        $hasMoreProposals = true;
+
+        while ($hasMoreProposals) {
             $bestCandidate = null;
             $bestTruckKey = null;
 
@@ -239,6 +250,15 @@ class TopologyEngine
 
                     // Nutzt das instanziierte distanceService-Objekt der Klasse
                     $emptyRunDist = $this->distanceService->getDistance($currentEndpoint, $op['from_city_id']);
+
+                    // Stufe 1: Strikte 3SR-Nachbarschaft | Stufe 2: Erweiterungszone unter 100 km Anfahrt
+                    $in3SR = in_array((int)$op['from_city_id'], $neighborhood, true);
+                    if (!$in3SR && $emptyRunDist >= 100) {
+                        continue; // Anfahrten ab 100 km ablehnen
+                    }
+
+                    // 3SR-Angebote erhalten Priorität vor 100km-Fallback-Angeboten
+                    $effectiveScore = $in3SR ? $emptyRunDist : ($emptyRunDist + 1000);
                     
                     // KORREKTUR: Berechnet die exakte proportionale Kilometer-Marge des LKW für diese Fahrt
                     $loadedWeight = min((int)$op['weight_remaining'], (int)$t['capacity_t']);
@@ -254,6 +274,7 @@ class TopologyEngine
                             'pool_index' => $index,
                             'order' => $op,
                             'empty_run_dist' => $emptyRunDist,
+                            'effective_score' => $effectiveScore,
                             'profitability' => $profitability
                         ];
                         $bestTruckKey = $truckKey;
@@ -436,7 +457,7 @@ class TopologyEngine
             LIMIT $limit
         ");
         $stmt->execute(['city_id' => $cityId]);
-        return array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'city_id');
+        return array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'city_id'));
     }
 
     /**
@@ -670,8 +691,8 @@ class TopologyEngine
         $truckStmt->execute([$truckId]);
         $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
 
-        // Sicherheits-Check: Falls LKW nicht existiert oder nicht aktiv geschaltet ist, sofort abbrechen!
-        if (!$truck || (int)$truck['is_active_planning'] === 0) {
+        // Sicherheits-Check: Falls LKW nicht existiert, sofort abbrechen!
+        if (!$truck) {
             return [];
         }
 
