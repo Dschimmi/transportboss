@@ -222,6 +222,7 @@ class TopologyEngine
         // 5. Flottenweiter Proximity-Optimierungs-Loop (Autopilot mit fairem Round-Robin & Warehouse-First)
         $hasMoreProposals = true;
         $targetChainLength = 1; // Startet bei max. 1 Vorschlag pro LKW für faire Flotten-Verteilung
+        $usedOrdersPerTruck = []; // Verhindert nur doppelte Aufnahme in der Kette DIESELBEN LKWs
 
         while ($hasMoreProposals) {
             $bestCandidate = null;
@@ -243,6 +244,10 @@ class TopologyEngine
 
                 foreach ($virtualOrderPool as $index => $op) {
                     if ($op['weight_remaining'] <= 0) continue;
+                    
+                    // Verhindert nur die doppelte Aufnahme desselben Auftrags in der Kette DIESELBEN LKWs
+                    if (isset($usedOrdersPerTruck[$truckId]) && in_array($op['id'], $usedOrdersPerTruck[$truckId], true)) continue;
+
                     if (!self::isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
                     if ($op['is_adr'] === 1 && $driverAdr === 0) continue;
                     if (!in_array($op['from_city_id'], $neighborhood, true)) continue;
@@ -307,7 +312,7 @@ class TopologyEngine
                 $t = $activeTrucks[$bestTruckKey];
                 $truckId = $t['id'];
                 $poolIndex = $bestCandidate['pool_index'];
-                $orderToLoad = &$virtualOrderPool[$poolIndex];
+                $orderToLoad = $virtualOrderPool[$poolIndex]; // Lese-Kopie ohne globalen Abzug für andere LKW
 
                 // Verfügbares Gewicht VOR dem Laden für die Vorschlagsanzeige sichern
                 $availableBeforeLoad = (int)$orderToLoad['weight_remaining'];
@@ -324,7 +329,8 @@ class TopologyEngine
                     $assignedDriversInfo = $this->getAssignedDriversForOrder($orderToLoad['fingerprint'] ?? '', $suggestedChains);
                 }
 
-                $orderToLoad['weight_remaining'] -= $loadedWeight;
+                // DIESEM LKW merken, dass er den Auftrag in seiner Kette schon verwendet hat
+                $usedOrdersPerTruck[$truckId][] = $orderToLoad['id'];
 
                 $suggestedChains[$truckId][] = [
                     'order' => $orderToLoad,

@@ -13,6 +13,8 @@ declare(strict_types=1);
  */
 
 require_once 'db_connect.php';
+require_once 'classes/DistanceService.php';
+require_once 'classes/TopologyEngine.php';
 
 /**
  * JobLoader
@@ -79,9 +81,16 @@ class JobLoader
             $weightTotal = (int)$order['weight_total'];
             $revenue = (float)$order['revenue'];
 
+            // Auftragsbezeichnung für verständliches Feedback aufbauen
+            $fromName = $this->pdo->query("SELECT name FROM cities WHERE id = " . (int)$order['from_city_id'])->fetchColumn() ?: 'Unbekannt';
+            $toName = $this->pdo->query("SELECT name FROM cities WHERE id = " . (int)$order['to_city_id'])->fetchColumn() ?: 'Unbekannt';
+            $orderLabel = !empty($order['ingame_order_id']) 
+                ? $order['ingame_order_id'] 
+                : ($order['commodity'] . ' [' . $fromName . ' ➔ ' . $toName . ']');
+
             // Sicherheits-Interlock: Prüfen, ob überhaupt noch Tonnage übrig ist
             if ($weightRemaining <= 0) {
-                throw new Exception("Dieser Auftrag hat keine verbleibende Tonnage mehr!");
+                throw new Exception("Der Auftrag '{$orderLabel}' hat keine verbleibende Tonnage mehr!");
             }
 
             // Klon-Erzeugung erzwingen wenn Restgewicht > Kapazität ODER wenn der Auftrag bereits gesplittet ist (PH A2 § 3.3.4)
@@ -230,19 +239,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
         $loader = new JobLoader($pdo);
         $remainingWeight = $loader->execute($truckId, $orderId);
 
-        // --- FLOTTENWEITE PROPAGIERUNG DES TEILVERPLANTEN JOBS IN DER SESSION ---
+        // --- FLOTTENWEITE PROPAGIERUNG & DYNAMISCHE KETTEN-REPARATUR IN DER SESSION ---
         if (!empty($_SESSION['tb_suggested_chains']) && is_array($_SESSION['tb_suggested_chains'])) {
+            $topologyEngine = new TopologyEngine($pdo, new DistanceService($pdo));
+
             foreach ($_SESSION['tb_suggested_chains'] as $tId => &$chain) {
-                foreach ($chain as $key => &$step) {
-                    if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
-                        if ((int)$tId === $truckId) {
+                $tId = (int)$tId;
+                if ($tId === $truckId) {
+                    // Für das ladende Fahrzeug: Den geladenen Schritt entfernen
+                    foreach ($chain as $key => $step) {
+                        if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
                             unset($chain[$key]);
                             $chain = array_values($chain);
                             break;
+                        }
+                    }
+                } else {
+                    // Für andere LKW: Prüfen, ob der geladene Auftrag in deren Kette enthalten war
+                    $brokenKey = null;
+                    foreach ($chain as $key => $step) {
+                        if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
+                            $brokenKey = $key;
+                            break;
+                        }
+                    }
+
+                    if ($brokenKey !== null) {
+                        // Kette ab der Bruchstelle kappen
+                        $chain = array_slice($chain, 0, $brokenKey);
+
+                        // Ausgangspunkt für die Reparatur ermitteln (Zielort des letzten verbliebenen Schritts oder Standort)
+                        $repairStartCityId = 0;
+                        if (!empty($chain)) {
+                            $lastStep = end($chain);
+                            $repairStartCityId = (int)$lastStep['order']['to_city_id'];
                         } else {
-                            $step['order']['weight_remaining'] = $remainingWeight;
-                            if ($remainingWeight > 0) {
-                                $step['status'] = 'partially_planned';
+                            $lastOrderCity = $pdo->query("
+                                SELECT to_city_id FROM orders 
+                                WHERE assigned_truck_id = $tId AND is_archived = 0 
+                                ORDER BY assigned_at DESC LIMIT 1
+                            ")->fetchColumn();
+                            if ($lastOrderCity) {
+                                $repairStartCityId = (int)$lastOrderCity;
+                            } else {
+                                $repairStartCityId = (int)$pdo->query("SELECT current_city_id FROM trucks WHERE id = $tId")->fetchColumn();
+                            }
+                        }
+
+                        // Im RAM frische Folge-Vorschläge ab der Bruchstelle berechnen
+                        if ($repairStartCityId > 0) {
+                            $freshScan = $topologyEngine->getRadarScanForTruck($tId, $repairStartCityId);
+                            foreach ($freshScan as $freshStep) {
+                                if (count($chain) >= 6) break;
+                                $alreadyInChain = false;
+                                foreach ($chain as $existingStep) {
+                                    if (isset($existingStep['order']['id']) && (int)$existingStep['order']['id'] === (int)$freshStep['order']['id']) {
+                                        $alreadyInChain = true;
+                                        break;
+                                    }
+                                }
+                                if (!$alreadyInChain) {
+                                    $chain[] = $freshStep;
+                                }
                             }
                         }
                     }
@@ -251,12 +309,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
             unset($chain, $step);
         }
     } catch (Exception $e) {
-        die("Fataler Fehler beim Zuweisen des Auftrags: " . $e->getMessage());
-    }
+            // Sanftes Abfangen bei bereits vergebenen/aufgebrauchten Aufträgen (kein Seiten-Absturz!)
+            if (session_status() === PHP_SESSION_NONE) {
+                session_start();
+            }
+            $_SESSION['tb_debug_load_msg'] = "⚠️ " . $e->getMessage();
 
-    // Zurück zur Disposition mit dem ausgewählten LKW im Fokus
-    header("Location: dispatcher_board.php?focus_truck_id=" . $truckId);
-    exit;
+            // Aufgebrauchten Auftrag flächendeckend aus allen Vorschlagsketten in der Session entfernen
+            if (!empty($_SESSION['tb_suggested_chains']) && is_array($_SESSION['tb_suggested_chains'])) {
+                foreach ($_SESSION['tb_suggested_chains'] as $tId => &$chain) {
+                    foreach ($chain as $key => &$step) {
+                        if (isset($step['order']['id']) && (int)$step['order']['id'] === $orderId) {
+                            unset($chain[$key]);
+                            $chain = array_values($chain);
+                            break;
+                        }
+                    }
+                }
+                unset($chain, $step);
+            }
+        }
+
+        // Zurück zur Disposition mit dem ausgewählten LKW im Fokus
+        header("Location: dispatcher_board.php?focus_truck_id=" . $truckId);
+        exit;
 }
 
 // Fallback-Redirect bei ungültigem Direktaufruf
