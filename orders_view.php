@@ -184,72 +184,72 @@ $marketImportTime = $lastMarketImport ? date('H:i', strtotime((string)$lastMarke
 // CHRONOLOGISCHE AUTOPILOT-BRÜCKE & LEITSTAND-DIAGNOSTIK
 // -------------------------------------------------------------
 
-// A. Mangel-Städte (FEHLT-Ausgleich) ermitteln über den CityService (PH § 1.3.1)
+// A. Gestrandete LKW-Klassen ohne Anschlussfracht (0 km) je Standort ermitteln
 require_once 'classes/CityService.php';
 $cityServiceForPr = new CityService($pdo);
-$missingCities = $cityServiceForPr->getEmptyWarehouseCities();
+$strandedCitiesData = $cityServiceForPr->getStrandedTruckTypesPerCity();
 
-// B. Von aktiven LKW empfohlene Marktpool-Aufträge (DISPO-VORSCHLAG) ermitteln
-// MAP-ERFASSUNG MIT ANFAHRTSDISTANZ (3SR-AMPELSYSSTEM)
-$recommendedMap = [];
-$recommendedIds = [];
+// B. Anschlussfracht-Badges & Quota-Gedeckelte Priorisierung vergeben
+$assignedBadgeCounts = []; // Zähler für bereits vergebene Badges pro [city_id][vehicle_type]
 
-// Falls noch keine Ketten in der Session existieren: Einmalig initial berechnen
-if (empty($_SESSION['tb_suggested_chains'])) {
-    $activeTrucks = $pdo->query("
-        SELECT id, current_city_id, vehicle_type, capacity_t, assigned_driver_id 
-        FROM trucks 
-        WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL
-    ")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($rankedOrders as &$o) {
+    $oFromCityId = (int)$o['from_id'];
+    $o['anschluss_badges'] = [];
 
-    if (!empty($activeTrucks)) {
-        $topologyEngine = new TopologyEngine($pdo, $distanceService);
-        $_SESSION['tb_suggested_chains'] = $topologyEngine->calculateAutopilotChains();
-        $_SESSION['tb_suggested_chains_time'] = date('H:i:s');
-    }
-}
+    if (isset($strandedCitiesData[$oFromCityId])) {
+        $strandedTypes = $strandedCitiesData[$oFromCityId]['stranded_types'] ?? [];
+        foreach ($strandedTypes as $vType => $truckList) {
+            $trucks = is_array($truckList) ? $truckList : [];
+            $maxAllowedBadges = count($trucks); // Maximal so viele Badges wie gestrandete LKW dieser Klasse vor Ort!
+            $currentBadgeCount = $assignedBadgeCounts[$oFromCityId][$vType] ?? 0;
 
-$suggestedChains = $_SESSION['tb_suggested_chains'] ?? [];
+            // QUOTA-CAP: Wenn bereits genügend Anschluss-Badges für diesen Typ an dieser Stadt vergeben wurden -> Überspringen!
+            if ($currentBadgeCount >= $maxAllowedBadges) {
+                continue;
+            }
 
-if (!empty($suggestedChains)) {
-    $indexCounter = 0;
-    foreach ($suggestedChains as $truckId => $chain) {
-        foreach ($chain as $step) {
-            if (isset($step['status']) && $step['status'] === 'market' && isset($step['order']['id'])) {
-                $orderId = (int)$step['order']['id'];
-                $recommendedIds[] = $orderId;
-                
-                if (!isset($recommendedMap[$orderId])) {
-                    $recommendedMap[$orderId] = [
-                        'empty_run_dist' => (int)($step['empty_run_dist'] ?? 0),
-                        'index' => $indexCounter++
-                    ];
+            // 1. Matrix-Kompatibilität prüfen
+            if (!TopologyEngine::isTypeCompatible($o['freight_type'], $vType)) {
+                continue;
+            }
+
+            // Prüfen, ob mindestens ein gestrandeter LKW dieser Klasse ALLE Restriktionen erfüllt
+            $isFullyCompatible = false;
+            
+            foreach ($trucks as $trSpec) {
+                // 2. ADR-Erlaubnis des Fahrers prüfen
+                if ((int)$o['is_adr'] === 1 && empty($trSpec['adr_permit'])) {
+                    continue;
                 }
+
+                // 3. Tonnage-Sperren (Min/Max) prüfen
+                $oWeight = (int)$o['weight_total'];
+                $minW = (int)($trSpec['min_weight_t'] ?? 0);
+                $maxW = (int)($trSpec['max_weight_t'] ?? 0);
+
+                if ($oWeight < $minW) {
+                    continue;
+                }
+                if ($maxW > 0 && $oWeight > $maxW) {
+                    continue;
+                }
+
+                $isFullyCompatible = true;
+                break;
+            }
+
+            if ($isFullyCompatible) {
+                $o['anschluss_badges'][] = '[ANSCHLUSS: ' . htmlspecialchars($vType) . ']';
+                $assignedBadgeCounts[$oFromCityId][$vType] = $currentBadgeCount + 1;
             }
         }
     }
-}
-$recommendedIds = array_unique($recommendedIds);
-
-// C. Prioritäten und Reihenfolgen-Index vergeben
-foreach ($rankedOrders as &$o) {
-    $oId = (int)$o['id'];
-    $o['is_recommended_priority'] = in_array($oId, $recommendedIds, true) ? 1 : 0;
-    $o['recommended_info'] = $recommendedMap[$oId] ?? null;
-    $o['recommended_index'] = $recommendedMap[$oId]['index'] ?? 999999;
-    $o['is_missing_priority'] = in_array($o['from_city'], $missingCities, true) ? 1 : 0;
+    $o['is_missing_priority'] = !empty($o['anschluss_badges']) ? 1 : 0;
 }
 unset($o);
 
-// Drei-Stufen-Priorität mit chronologischem Index-Filter
+// Zweistufige Prioritäts-Sortierung: 1. Gestrandete LKW retten (ANSCHLUSS-Badges), 2. Erlös pro km (DESC)
 usort($rankedOrders, function($a, $b) {
-    if ($a['is_recommended_priority'] !== $b['is_recommended_priority']) {
-        return $b['is_recommended_priority'] <=> $a['is_recommended_priority'];
-    }
-    // Wenn beide empfohlen sind, sortiere nach der chronologischen Fahrtreihenfolge (ASC!)
-    if ($a['is_recommended_priority'] === 1 && $a['recommended_index'] !== $b['recommended_index']) {
-        return $a['recommended_index'] <=> $b['recommended_index'];
-    }
     if ($a['is_missing_priority'] !== $b['is_missing_priority']) {
         return $b['is_missing_priority'] <=> $a['is_missing_priority'];
     }
@@ -387,18 +387,13 @@ $normalizeFreight = function(string $type): string {
                 <td><?php echo htmlspecialchars($o['from_city']); ?></td>
                 <td><?php echo htmlspecialchars($o['to_city']); ?></td>
                 <td>
-                    <?php if ($o['is_recommended_priority'] && !empty($o['recommended_info'])): ?>
-                        <?php if ((int)$o['recommended_info']['empty_run_dist'] === 0): ?>
-                            <span class="radar-type-1" title="Direkte Anschlussfracht am Standort des LKW (0 km Anfahrt)!">[DISPO-VORSCHLAG: DIREKT]</span>
-                        <?php else: ?>
-                            <span class="radar-type-2" title="Anschlussfracht mit <?= $o['recommended_info']['empty_run_dist'] ?> km Anfahrt (3SR)">[DISPO-VORSCHLAG: <?= $o['recommended_info']['empty_run_dist'] ?> km Anfahrt]</span>
-                        <?php endif; ?>
-                    <?php endif; ?>
-                    <?php if ($o['is_missing_priority']): ?>
-                        <span class="badge-missing" title="Diese Stadt hat aktuell 0 Lager-Aufträge!">[FEHLT-AUSGLEICH]</span>
+                    <?php if (!empty($o['anschluss_badges'])): ?>
+                        <?php foreach ($o['anschluss_badges'] as $badgeText): ?>
+                            <span class="badge-missing" title="Direkte 0km-Anschlussfracht zur Rettung eines am Zielort gestrandeten LKW!"><?= $badgeText ?></span>
+                        <?php endforeach; ?>
                     <?php endif; ?>
                     <?php echo $o['is_adr'] ? '<span class="adr-badge">[ADR]</span>' : ''; ?>
-                    <?php if (!$o['is_recommended_priority'] && !$o['is_missing_priority'] && !$o['is_adr']): ?>
+                    <?php if (empty($o['anschluss_badges']) && !$o['is_adr']): ?>
                         <span class="text-gray">-</span>
                     <?php endif; ?>
                 </td>

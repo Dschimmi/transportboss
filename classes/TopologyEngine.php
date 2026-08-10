@@ -239,13 +239,34 @@ class TopologyEngine
                 $currentEndpoint = $virtualEndpoints[$truckId];
                 $driverAdr = $truckDriversAdr[$truckId];
                 
+                // Letzte Startstadt der Vor-Etappe ermitteln für die U-Turn-Sperre
+                $lastDepartureCityId = 0;
+                if (!empty($suggestedChains[$truckId])) {
+                    $lastStep = end($suggestedChains[$truckId]);
+                    $lastDepartureCityId = (int)$lastStep['order']['from_city_id'];
+                } else {
+                    $lastAssigned = $this->pdo->query("
+                        SELECT from_city_id FROM orders 
+                        WHERE assigned_truck_id = " . (int)$t['id'] . " AND is_archived = 0 
+                        ORDER BY assigned_at DESC LIMIT 1
+                    ")->fetch(PDO::FETCH_ASSOC);
+                    if ($lastAssigned) {
+                        $lastDepartureCityId = (int)$lastAssigned['from_city_id'];
+                    }
+                }
+
                 $neighborhood = $this->getNearestCities($currentEndpoint, 2);
                 $neighborhood[] = $currentEndpoint;
 
                 foreach ($virtualOrderPool as $index => $op) {
                     if ($op['weight_remaining'] <= 0) continue;
                     
-                    // Verhindert nur die doppelte Aufnahme desselben Auftrags in der Kette DIESELBEN LKWs
+                    // U-TURN-SPERRE: Verhindert sinnlose Pendel-Leerfahrten zurück zur Startstadt der Vor-Etappe (A -> B -> [leer A])
+                    if ($lastDepartureCityId > 0 && $currentEndpoint !== $lastDepartureCityId && (int)$op['from_city_id'] === $lastDepartureCityId) {
+                        continue;
+                    }
+
+                    // NICHT-EXKLUSIVER VORSCHLAG: Verhindert nur doppelte Aufnahme desselben Auftrags beim DIESELBEN LKW
                     if (isset($usedOrdersPerTruck[$truckId]) && in_array($op['id'], $usedOrdersPerTruck[$truckId], true)) continue;
 
                     if (!self::isTypeCompatible($op['freight_type'], $t['vehicle_type'])) continue;
@@ -740,6 +761,17 @@ class TopologyEngine
         $capacity = (int)$truck['capacity_t'];
         $vehicleType = $truck['vehicle_type'];
 
+        // Letzte Startstadt der Vor-Etappe ermitteln für die U-Turn-Sperre
+        $lastDepartureCityId = 0;
+        $lastAssigned = $this->pdo->query("
+            SELECT from_city_id FROM orders 
+            WHERE assigned_truck_id = " . (int)$truckId . " AND is_archived = 0 
+            ORDER BY assigned_at DESC LIMIT 1
+        ")->fetch(PDO::FETCH_ASSOC);
+        if ($lastAssigned) {
+            $lastDepartureCityId = (int)$lastAssigned['from_city_id'];
+        }
+
         // Lade alle owned LKWs zur Auswertung der Tonnagen-Sicherheitsweiche
         $stmtAllOwned = $this->pdo->query("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks");
         $allOwnedTrucks = $stmtAllOwned->fetchAll(PDO::FETCH_ASSOC);
@@ -774,6 +806,11 @@ class TopologyEngine
         $hasFreeSlots = $this->hasFreeSlots();
 
         foreach ($orders as $order) {
+            // U-TURN-SPERRE: Verhindert sinnlose Pendel-Leerfahrten zurück zur Startstadt der Vor-Etappe (A -> B -> [leer A])
+            if ($lastDepartureCityId > 0 && $currentCityId !== $lastDepartureCityId && (int)$order['from_city_id'] === $lastDepartureCityId) {
+                continue;
+            }
+
             // Kompatibilitäts- und ADR-Prüfung
             if (!self::isTypeCompatible($order['freight_type'], $vehicleType)) continue;
 

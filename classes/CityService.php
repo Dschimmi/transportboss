@@ -141,29 +141,158 @@ class CityService
     }
 
     /**
-     * Prüft mathematisch exakt (K_X < N - 1), ob für eine Stadt unvollständige Matrix-Daten vorliegen.
-     *
-     * @param int $cityId Technische ID der Stadt
-     * @return bool True, wenn mindestens eine Verbindung zu allen anderen Städten in distances fehlt
-     */
-    public function hasIncompleteMatrix(int $cityId): bool
-    {
-        // 1. Gesamtzahl N aller registrierten Städte ermitteln
-        $totalCities = (int)$this->pdo->query("SELECT COUNT(*) FROM cities")->fetchColumn();
-        if ($totalCities <= 1) {
-            return false;
+         * Prüft mathematisch exakt (K_X < N - 1), ob für eine Stadt unvollständige Matrix-Daten vorliegen.
+         *
+         * @param int $cityId Technische ID der Stadt
+         * @return bool True, wenn mindestens eine Verbindung zu allen anderen Städten in distances fehlt
+         */
+        public function hasIncompleteMatrix(int $cityId): bool
+        {
+            // 1. Gesamtzahl N aller registrierten Städte ermitteln
+            $totalCities = (int)$this->pdo->query("SELECT COUNT(*) FROM cities")->fetchColumn();
+            if ($totalCities <= 1) {
+                return false;
+            }
+
+            // 2. Anzahl K_X aller erfassten Verbindungen für diese Stadt in distances ermitteln
+            $stmt = $this->pdo->prepare("
+                SELECT COUNT(*) 
+                FROM distances 
+                WHERE city_a_id = :id OR city_b_id = :id
+            ");
+            $stmt->execute(['id' => $cityId]);
+            $recordedConnections = (int)$stmt->fetchColumn();
+
+            // 3. Unvollständig, wenn weniger als N - 1 Verbindungen vorliegen
+            return $recordedConnections < ($totalCities - 1);
         }
 
-        // 2. Anzahl K_X aller erfassten Verbindungen für diese Stadt in distances ermitteln
-        $stmt = $this->pdo->prepare("
-            SELECT COUNT(*) 
-            FROM distances 
-            WHERE city_a_id = :id OR city_b_id = :id
-        ");
-        $stmt->execute(['id' => $cityId]);
-        $recordedConnections = (int)$stmt->fetchColumn();
+        /**
+         * Ermittelt für alle Standorte diejenigen LKW-Klassen, die dort demnächst leer werden,
+         * für die vor Ort jedoch aktuell 0 kompatible, regelkonforme Anschlussfrachten (0 km Anfahrt) bereitstehen.
+         *
+         * @return array [city_id => ['city_id' => int, 'city_name' => string, 'stranded_types' => [type_name => count]]]
+         */
+        public function getStrandedTruckTypesPerCity(): array
+        {
+            // 1. Alle disponiblen LKW, Fahrer-ADR-Status und ihr virtuelles Tourende (oder Standort) ermitteln
+            $stmtTrucks = $this->pdo->query("
+                SELECT t.id, t.vehicle_type, t.capacity_t, t.min_weight_t, t.max_weight_t, t.current_city_id,
+                       d.adr_permit,
+                       COALESCE(
+                           (SELECT to_city_id FROM orders WHERE assigned_truck_id = t.id AND is_archived = 0 ORDER BY assigned_at DESC LIMIT 1),
+                           t.current_city_id
+                       ) AS tour_end_city_id
+                FROM trucks t
+                LEFT JOIN drivers d ON t.assigned_driver_id = d.ingame_driver_id
+                WHERE t.assigned_driver_id IS NOT NULL
+            ");
+            $trucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
 
-        // 3. Unvollständig, wenn weniger als N - 1 Verbindungen vorliegen
-        return $recordedConnections < ($totalCities - 1);
+            if (empty($trucks)) {
+                return [];
+            }
+
+            // Lade alle owned LKWs zur Auswertung der Tonnagen-Sicherheitsweiche
+            $stmtAllOwned = $this->pdo->query("SELECT id, capacity_t, vehicle_type, min_weight_t, max_weight_t FROM trucks");
+            $allOwnedTrucks = $stmtAllOwned->fetchAll(PDO::FETCH_ASSOC);
+
+            // 2. Alle gesicherten LAGER-Aufträge (is_accepted = 1) im System als Anschlüsse laden
+            $stmtOrders = $this->pdo->query("
+                SELECT from_city_id, freight_type, is_adr, weight_remaining
+                FROM orders 
+                WHERE is_archived = 0 AND assigned_truck_id IS NULL AND weight_remaining > 0 AND is_accepted = 1
+            ");
+            $availableOrders = $stmtOrders->fetchAll(PDO::FETCH_ASSOC);
+
+            // Map der verfügbaren Frachtaufträge pro Startstadt aufbauen
+            $cityOrdersMap = [];
+            foreach ($availableOrders as $ord) {
+                $cityOrdersMap[(int)$ord['from_city_id']][] = $ord;
+            }
+
+            // 3. Prüfen, ob für jeden LKW an seinem Zielort eine regelkonforme Anschlussfracht (0 km) existiert
+            $strandedPerCity = [];
+
+            foreach ($trucks as $tr) {
+                $endCityId = (int)$tr['tour_end_city_id'];
+                $vType = $tr['vehicle_type'];
+                $hasDriverAdr = !empty($tr['adr_permit']);
+
+                $startOrders = $cityOrdersMap[$endCityId] ?? [];
+                $hasCompatibleOrder = false;
+
+                foreach ($startOrders as $cand) {
+                    // A. Fahrzeugtyp-Kompatibilität prüfen
+                    if (!TopologyEngine::isTypeCompatible($cand['freight_type'], $vType)) {
+                        continue;
+                    }
+
+                    // B. ADR-Berechtigung des Fahrers prüfen
+                    if ((int)$cand['is_adr'] === 1 && !$hasDriverAdr) {
+                        continue;
+                    }
+
+                    // C. Tonnage-Prüfung inkl. Notfall-Freigabe der Sicherheitsweiche
+                    $weight = (int)$cand['weight_remaining'];
+                    $min = (int)($tr['min_weight_t'] ?? 0);
+                    $max = (int)($tr['max_weight_t'] ?? 0);
+
+                    $allowedByMin = ($weight >= $min);
+                    $allowedByMax = ($max === 0 || $weight <= $max);
+
+                    if (!$allowedByMin || !$allowedByMax) {
+                        $anyOtherCanHaul = false;
+                        foreach ($allOwnedTrucks as $otherTruck) {
+                            if ((int)$otherTruck['id'] === (int)$tr['id']) continue;
+                            if (!TopologyEngine::isTypeCompatible($cand['freight_type'], $otherTruck['vehicle_type'])) continue;
+
+                            $otherMin = (int)($otherTruck['min_weight_t'] ?? 0);
+                            $otherMax = (int)($otherTruck['max_weight_t'] ?? 0);
+                            if ($weight >= $otherMin && ($otherMax === 0 || $weight <= $otherMax)) {
+                                $anyOtherCanHaul = true;
+                                break;
+                            }
+                        }
+                        if ($anyOtherCanHaul) {
+                            continue; // Sperre bleibt aktiv -> dieser LKW darf die Fracht nicht nehmen
+                        }
+                    }
+
+                    // Wenn alle Kriterien erfüllt sind, existiert eine gültige Anschlussfracht!
+                    $hasCompatibleOrder = true;
+                    break;
+                }
+
+                // Falls KEINE regelkonforme Fracht an diesem Standort startet -> LKW-Klasse samt Restriktionen eintragen
+                if (!$hasCompatibleOrder) {
+                    if (!isset($strandedPerCity[$endCityId])) {
+                        $cityName = $this->pdo->query("SELECT name FROM cities WHERE id = $endCityId")->fetchColumn() ?: 'Unbekannt';
+                        $strandedPerCity[$endCityId] = [
+                            'city_id' => $endCityId,
+                            'city_name' => $cityName,
+                            'stranded_types' => [],
+                            'stranded_total_tonnage' => 0
+                        ];
+                    }
+                    $strandedPerCity[$endCityId]['stranded_types'][$vType][] = [
+                        'capacity_t' => (int)$tr['capacity_t'],
+                        'min_weight_t' => (int)$tr['min_weight_t'],
+                        'max_weight_t' => (int)$tr['max_weight_t'],
+                        'adr_permit' => !empty($tr['adr_permit'])
+                    ];
+                    $strandedPerCity[$endCityId]['stranded_total_tonnage'] += (int)$tr['capacity_t'];
+                }
+            }
+
+            // Standard-Sortierung: Absteigend nach gestrandeter Gesamttonnage (höchste Tonnage zuerst)
+            usort($strandedPerCity, function($a, $b) {
+                if ($a['stranded_total_tonnage'] !== $b['stranded_total_tonnage']) {
+                    return $b['stranded_total_tonnage'] <=> $a['stranded_total_tonnage'];
+                }
+                return strcmp($a['city_name'], $b['city_name']);
+            });
+
+            return $strandedPerCity;
+        }
     }
-}

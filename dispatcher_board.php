@@ -296,18 +296,9 @@ foreach ($allDrivers as $d) {
     $driverMap[$d['ingame_driver_id']] = $d;
 }
 
-// KORREKTUR: Städte für Sidebar laden - Zählt und summiert nun ausschließlich Lageraufträge (is_accepted = 1)
-$cities = $pdo->query("
-    SELECT
-        c.id,
-        c.name,
-        COUNT(o.id) AS total_jobs,
-        COALESCE(SUM(o.weight_remaining), 0) AS total_weight
-    FROM cities c
-    LEFT JOIN orders o ON c.id = o.from_city_id AND o.is_accepted = 1 AND o.is_archived = 0 AND o.weight_remaining > 0 AND o.assigned_truck_id IS NULL
-    GROUP BY c.id, c.name
-    ORDER BY total_jobs ASC, c.name ASC
-")->fetchAll(PDO::FETCH_ASSOC);
+// NEU: Frachtvakuum-Monitor für die Sidebar laden (Zielorte von LKW ohne 0km-Anschlussfracht)
+$cityServiceForSidebar = new CityService($pdo);
+$strandedCities = $cityServiceForSidebar->getStrandedTruckTypesPerCity();
 
 // --- HELFER-FUNKTIONEN FÜR DEN ALGORITHMUS ---
 function get3CityNeighborhood(PDO $pdo, int $cityId): array {
@@ -518,32 +509,39 @@ if ($focusTruck) {
         </div>
         <div class="board-layout">
             
-            <!-- SPALTE 1 (LINKS): Sidebar (Strategic Monitor) -->
+            <!-- SPALTE 1 (LINKS): Sidebar (Frachtvakuum-Monitor) -->
             <div class="board-sidebar">
-                <h2 class="accent-text sidebar-title">Strategie-Monitor</h2>
+                <h2 class="accent-text sidebar-title">Frachtvakuum-Monitor</h2>
                 <input type="text" id="cityFilter" class="filter-input city-filter-input" placeholder="Städte filtern (Multisearch)...">
                 <table class="data-table sidebar-table" id="sidebarTable">
                     <thead>
                         <tr>
-                            <th>Stadt</th>
-                            <th>Jobs (Lager)</th>
-                            <th>Bestand (t)</th>
+                            <th>Zielort (Tourende)</th>
+                            <th>Gestrandete LKW-Klassen (0km-Fracht fehlt)</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($cities as $city): ?>
-                            <tr>
-                                <td><?= htmlspecialchars($city['name']) ?></td>
-                                <td><?= $city['total_jobs'] > 0 ? $city['total_jobs'] : '-' ?></td>
-                                <td class="<?= $city['total_weight'] > 0 ? '' : 'status-missing' ?>">
-                                    <?php if ($city['total_weight'] > 0): ?>
-                                        <?= number_format((float)$city['total_weight'], 0, ',', '.') ?> t
-                                    <?php else: ?>
-                                        <span class="badge-missing">FEHLT</span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
+                        <?php if (empty($strandedCities)): ?>
+                            <tr><td colspan="2" class="text-center text-muted-italic">Alle Fahrzeuge haben direkte Anschlussfrachten am Tourende.</td></tr>
+                        <?php else: ?>
+                            <?php foreach ($strandedCities as $sCity): ?>
+                                <?php
+                                $typeLabels = [];
+                                foreach ($sCity['stranded_types'] as $tName => $truckList) {
+                                    $count = is_array($truckList) ? count($truckList) : $truckList;
+                                    $typeLabels[] = $count . 'x ' . htmlspecialchars($tName);
+                                }
+                                ?>
+                                <tr>
+                                    <td><strong><?= htmlspecialchars($sCity['city_name']) ?></strong></td>
+                                    <td>
+                                        <span class="badge-missing" title="Für diese LKW-Klassen existieren an diesem Zielort 0 kompatible Anschlussfrachten!">
+                                            <?= implode('<br>', $typeLabels) ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
