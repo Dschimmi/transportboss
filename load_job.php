@@ -180,14 +180,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
     $truckId = (int)$_POST['truck_id'];
     $orderId = (int)$_POST['order_id'];
 
+    // DEBUG Start
     try {
-        $loader = new JobLoader($pdo);
-        $remainingWeight = $loader->execute($truckId, $orderId);
-
-        // --- SCHRITT 1: FLOTTENWEITE PROPAGIERUNG DES TEILVERPLANTEN JOBS IN DER SESSION ---
+        // DEBUG-ERFASSUNG: Vor dem Laden prüfen, welche anderen LKW diesen Auftrag in den Vorschlägen hatten
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
+
+        $stmtOrderInfo = $pdo->prepare("SELECT fingerprint FROM orders WHERE id = ?");
+        $stmtOrderInfo->execute([$orderId]);
+        $targetFingerprint = $stmtOrderInfo->fetchColumn();
+
+        if ($targetFingerprint && !empty($_SESSION['tb_suggested_chains'])) {
+            $otherTrucksFound = [];
+
+            foreach ($_SESSION['tb_suggested_chains'] as $otherTruckId => $chain) {
+                if ((int)$otherTruckId === $truckId) continue;
+
+                foreach ($chain as $step) {
+                    if (isset($step['order']['fingerprint']) && $step['order']['fingerprint'] === $targetFingerprint) {
+                        $stmtT = $pdo->prepare("
+                            SELECT t.capacity_t, t.vehicle_type, d.first_name, d.last_name
+                            FROM trucks t
+                            LEFT JOIN drivers d ON t.assigned_driver_id = d.ingame_driver_id
+                            WHERE t.id = ?
+                        ");
+                        $stmtT->execute([(int)$otherTruckId]);
+                        $tInfo = $stmtT->fetch(PDO::FETCH_ASSOC);
+
+                        if ($tInfo) {
+                            $driverName = !empty($tInfo['last_name']) ? ($tInfo['last_name'] . ', ' . mb_substr($tInfo['first_name'] ?? '', 0, 1) . '.') : 'Unbesetzt';
+                            $truckSpec = $tInfo['capacity_t'] . 't ' . $tInfo['vehicle_type'];
+                            $entry = $driverName . ' (' . $truckSpec . ')';
+                            if (!in_array($entry, $otherTrucksFound, true)) {
+                                $otherTrucksFound[] = $entry;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!empty($otherTrucksFound)) {
+                $_SESSION['tb_debug_load_msg'] = "🔍 [DEBUG] Dieser geladene Auftrag war zeitgleich auch bei folgenden anderen LKW vorgeschlagen: " . implode(', ', $otherTrucksFound);
+            } else {
+                $_SESSION['tb_debug_load_msg'] = "🔍 [DEBUG] Dieser geladene Auftrag war bei KEINEM anderen LKW in den Vorschlägen enthalten.";
+            }
+        }
+
+        $loader = new JobLoader($pdo);
+        $remainingWeight = $loader->execute($truckId, $orderId);
+
+        // --- FLOTTENWEITE PROPAGIERUNG DES TEILVERPLANTEN JOBS IN DER SESSION ---
         if (!empty($_SESSION['tb_suggested_chains']) && is_array($_SESSION['tb_suggested_chains'])) {
             foreach ($_SESSION['tb_suggested_chains'] as $tId => &$chain) {
                 foreach ($chain as $key => &$step) {
@@ -208,9 +251,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['truck_id'], $_POST['o
             unset($chain, $step);
         }
     } catch (Exception $e) {
-        // KORREKTUR: Zeigt den genauen Fehlergrund an, anstatt ihn stillschweigend zu ignorieren
         die("Fataler Fehler beim Zuweisen des Auftrags: " . $e->getMessage());
     }
+
     // Zurück zur Disposition mit dem ausgewählten LKW im Fokus
     header("Location: dispatcher_board.php?focus_truck_id=" . $truckId);
     exit;

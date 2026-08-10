@@ -65,23 +65,24 @@ class OrderRepository
     }
 
     /**
-     * Weist einen Auftrag einem Fahrzeug zu.
+     * Weist einen unzugeordneten Auftrag einem Fahrzeug zu (mit Überschreibschutz).
      *
      * @param int $orderId Die Auftrags-ID
      * @param int $truckId Die Fahrzeug-ID
-     * @return void
+     * @return bool True, wenn die Zuweisung erfolgreich war, sonst False
      */
-    public function assignToTruck(int $orderId, int $truckId): void
+    public function assignToTruck(int $orderId, int $truckId): bool
     {
         $stmt = $this->pdo->prepare("
             UPDATE orders
             SET assigned_truck_id = :truck_id, assigned_at = NOW(6), is_accepted = 1
-            WHERE id = :order_id
+            WHERE id = :order_id AND assigned_truck_id IS NULL
         ");
         $stmt->execute([
             'truck_id' => $truckId,
             'order_id' => $orderId
         ]);
+        return $stmt->rowCount() > 0;
     }
 
     /**
@@ -245,15 +246,27 @@ class OrderRepository
 
     /**
      * Stellt einen ungeteilten Einzelauftrag zurück in den Pool.
+     * Setzt is_accepted bei Börsenaufträgen (ohne IDN) automatisch wieder auf 0 (Börse) zurück.
      */
     public function releaseSingleOrder(int $orderId): void
     {
+        // 1. Selbstheilung: Korrigiert verwaiste Börsen-Datensätze ohne LKW-Zuweisung in der DB
+        $this->pdo->exec("
+            UPDATE orders 
+            SET is_accepted = 0 
+            WHERE assigned_truck_id IS NULL 
+              AND (ingame_order_id IS NULL OR ingame_order_id = '') 
+              AND is_accepted = 1
+        ");
+
+        // 2. Ziel-Auftrag freigeben und is_accepted bei Börsenaufträgen sauber auf 0 zurücksetzen
         $stmtUnassign = $this->pdo->prepare("
             UPDATE orders 
             SET assigned_truck_id = NULL, 
                 assigned_at = NULL, 
                 weight_loaded = NULL, 
-                weight_remaining = weight_total 
+                weight_remaining = weight_total,
+                is_accepted = IF(ingame_order_id IS NULL OR ingame_order_id = '', 0, 1)
             WHERE id = ?
         ");
         $stmtUnassign->execute([$orderId]);

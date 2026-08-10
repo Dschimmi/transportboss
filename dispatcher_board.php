@@ -140,13 +140,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         try {
             foreach ($affectedOrders as $ord) {
                 $oId = (int)$ord['id'];
+                $motherId = false;
 
                 if (OrderRepository::isClone($ord)) {
-                    $orderRepo->refundClone($ord);
-                    $orderRepo->deleteClone($oId);
-                } else {
-                    $orderRepo->releaseSingleOrder($oId);
-                }
+                        $baseIdn = explode('-', $ord['ingame_order_id'])[0];
+                        $mStmt = $pdo->prepare("SELECT id FROM orders WHERE ingame_order_id = ? AND assigned_truck_id IS NULL AND is_archived = 0 LIMIT 1");
+                        $mStmt->execute([$baseIdn]);
+                        $motherId = $mStmt->fetchColumn();
+
+                        $orderRepo->refundClone($ord);
+                        $orderRepo->deleteClone($oId);
+                    } else {
+                        $orderRepo->releaseSingleOrder($oId);
+                    }
 
                     // D. Den entladenen Schritt exklusiv in die Vorschlagskette dieses LKWs zurückschreiben
                     if (isset($_SESSION['tb_suggested_chains'][$truckId]) && is_array($_SESSION['tb_suggested_chains'][$truckId])) {
@@ -488,6 +494,16 @@ if ($focusTruck) {
 </head>
 <body class="board-body">
     <?php require_once 'nav.php'; ?>
+
+    <!-- DEBUG-AUSGABE START -->
+    <?php if (!empty($_SESSION['tb_debug_load_msg'])): ?>
+        <div class="feedback-msg status-success" style="margin: 10px 20px; font-family: monospace;">
+            <?= htmlspecialchars($_SESSION['tb_debug_load_msg']) ?>
+        </div>
+        <?php unset($_SESSION['tb_debug_load_msg']); ?>
+    <?php endif; ?>
+    <!-- DEBUG-AUSGABE ENDE -->
+
     <div class="fluid-container">
         <div class="workspace-header-row">
             <h1 class="accent-text">Dispatcher Board</h1>
@@ -693,8 +709,8 @@ if ($focusTruck) {
                                     ORDER BY o.assigned_at ASC
                                 ")->fetchAll(PDO::FETCH_ASSOC);
 
-                                if (empty($assignedOrders)) {
-                                    echo '<tr><td colspan="7" class="text-center text-muted-italic empty-tour-cell">Keine Tour geplant</td></tr>';
+                                if (empty($assignedOrders) && empty($focusTruck['is_sofa'])) {
+                                    echo '<tr><td colspan="9" class="text-center text-muted-italic empty-tour-cell">Keine Tour geplant</td></tr>';
                                 } else {
                                     $currentCityId = (int)$focusTruck['current_city_id'];
                                     foreach ($assignedOrders as $index => $order) {
@@ -925,7 +941,12 @@ if ($focusTruck) {
                                             <?php if (!empty($order['ingame_order_id'])): ?>
                                                 <span class="copy-city" title="Klicken zum Kopieren"><?php echo htmlspecialchars($order['ingame_order_id']); ?></span>
                                             <?php elseif (($suggestion['status'] ?? '') === 'partially_planned'): ?>
-                                                <strong class="text-orange" title="Börsenauftrag bereits teilverplant; Ingame-IDN wird beim nächsten Lager-Import verheiratet">IDN ???</strong>
+                                                <?php 
+                                                $idnTooltip = !empty($suggestion['assigned_drivers_info']) 
+                                                    ? 'Börsenauftrag bereits teilverplant auf: ' . htmlspecialchars($suggestion['assigned_drivers_info']) 
+                                                    : 'Börsenauftrag bereits teilverplant; Ingame-IDN wird beim nächsten Lager-Import verheiratet';
+                                                ?>
+                                                <strong class="text-orange" title="<?php echo $idnTooltip; ?>">IDN ???</strong>
                                             <?php else: ?>
                                                 <span class="text-muted-italic">Marktpool</span>
                                             <?php endif; ?>
@@ -972,7 +993,10 @@ if ($focusTruck) {
                                             if (($suggestion['status'] ?? '') === 'warehouse') {
                                                 echo 'LAGER';
                                             } elseif (($suggestion['status'] ?? '') === 'partially_planned') {
-                                                echo 'TEILVERPLANT';
+                                                $statusTooltip = !empty($suggestion['assigned_drivers_info']) 
+                                                    ? 'title="Bereits verplant auf: ' . htmlspecialchars($suggestion['assigned_drivers_info']) . '"' 
+                                                    : '';
+                                                echo '<span ' . $statusTooltip . '>TEILVERPLANT</span>';
                                             } else {
                                                 echo 'BÖRSE';
                                             }

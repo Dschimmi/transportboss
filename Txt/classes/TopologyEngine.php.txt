@@ -114,15 +114,25 @@ class TopologyEngine
      *
      * @return array Assoziatives Array der Ketten [truck_id => [chain_steps]]
      */
-    public function calculateAutopilotChains(): array
+    public function calculateAutopilotChains(?int $singleTruckId = null): array
     {
-        // 1. Alle für die Disposition aktivierten Fahrzeuge laden
-        $stmtTrucks = $this->pdo->query("
-            SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
-            FROM trucks 
-            WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL AND is_sofa = 0
-        ");
-        $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+        // 1. Alle für die Disposition aktivierten Fahrzeuge laden (oder Einzelfahrzeug bei Fokus)
+        if ($singleTruckId !== null) {
+            $stmtTrucks = $this->pdo->prepare("
+                SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
+                FROM trucks 
+                WHERE id = ? AND assigned_driver_id IS NOT NULL
+            ");
+            $stmtTrucks->execute([$singleTruckId]);
+            $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $stmtTrucks = $this->pdo->query("
+                SELECT id, current_city_id, vehicle_type, capacity_t, min_weight_t, max_weight_t, assigned_driver_id 
+                FROM trucks 
+                WHERE is_active_planning = 1 AND assigned_driver_id IS NOT NULL AND is_sofa = 0
+            ");
+            $activeTrucks = $stmtTrucks->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         if (empty($activeTrucks)) {
             return [];
@@ -208,8 +218,9 @@ class TopologyEngine
 
         $marketOrdersCount = 0;
 
-        // 5. Flottenweiter Proximity-Optimierungs-Loop (Autopilot)
+        // 5. Flottenweiter Proximity-Optimierungs-Loop (Autopilot mit fairem Round-Robin & Warehouse-First)
         $hasMoreProposals = true;
+        $targetChainLength = 1; // Startet bei max. 1 Vorschlag pro LKW für faire Flotten-Verteilung
 
         while ($hasMoreProposals) {
             $bestCandidate = null;
@@ -217,16 +228,17 @@ class TopologyEngine
 
             foreach ($activeTrucks as $truckKey => $t) {
                 $truckId = $t['id'];
-                if (count($suggestedChains[$truckId]) >= 6) {
+                
+                // RUNDEN-GLEICHBEHANDLUNG: Inaktiv in dieser Runde, wenn die Ziel-Kettenlänge bereits erreicht ist
+                if (count($suggestedChains[$truckId]) >= $targetChainLength || count($suggestedChains[$truckId]) >= 6) {
                     continue;
                 }
 
                 $currentEndpoint = $virtualEndpoints[$truckId];
                 $driverAdr = $truckDriversAdr[$truckId];
                 
-                // Nutzt die bereits existierende, klasseneigene Methode zur Nachbarschafts-Suche (keine unassigned closures!)
                 $neighborhood = $this->getNearestCities($currentEndpoint, 2);
-                $neighborhood[] = $currentEndpoint; // Füge aktuelle Position zum Radius hinzu
+                $neighborhood[] = $currentEndpoint;
 
                 foreach ($virtualOrderPool as $index => $op) {
                     if ($op['weight_remaining'] <= 0) continue;
@@ -235,31 +247,49 @@ class TopologyEngine
                     if (!in_array($op['from_city_id'], $neighborhood, true)) continue;
                     if ($op['is_accepted'] === 0 && $marketOrdersCount >= $freeMarketSlots) continue;
 
-                    // Tonnagen-Restriktionen & "Reste-Kehrlogik" prüfen (PH § Tonnage-Sperren)
+                    // Tonnagen-Restriktionen & "Reste-Kehrlogik" prüfen
                     if (!$this->isOrderAllowedByWeight($op, $t, $allOwnedTrucks)) continue;
 
-                    // Nutzt das instanziierte distanceService-Objekt der Klasse
                     $emptyRunDist = $this->distanceService->getDistance($currentEndpoint, $op['from_city_id']);
 
-                    // Stufe 1: Strikte 3SR-Nachbarschaft | Stufe 2: Erweiterungszone unter 100 km Anfahrt
                     $in3SR = in_array((int)$op['from_city_id'], $neighborhood, true);
                     if (!$in3SR && $emptyRunDist >= 100) {
-                        continue; // Anfahrten ab 100 km ablehnen
+                        continue;
                     }
 
-                    // 3SR-Angebote erhalten Priorität vor 100km-Fallback-Angeboten
                     $effectiveScore = $in3SR ? $emptyRunDist : ($emptyRunDist + 1000);
                     
-                    // KORREKTUR: Berechnet die exakte proportionale Kilometer-Marge des LKW für diese Fahrt
                     $loadedWeight = min((int)$op['weight_remaining'], (int)$t['capacity_t']);
                     $proportionalRevenue = ($op['revenue'] / $op['weight_total']) * $loadedWeight;
                     $routeDistance = $this->distanceService->getDistance((int)$op['from_city_id'], (int)$op['to_city_id']);
                     $profitability = $proportionalRevenue / max(1, $routeDistance);
 
-                    if ($bestCandidate === null
-                        || $emptyRunDist < $bestCandidate['empty_run_dist'] 
-                        || ($emptyRunDist === $bestCandidate['empty_run_dist'] && $profitability > $bestCandidate['profitability'])) {
-                        
+                    // PREFERENZ-EVALUIERUNG: 1. Lager-Auftrag (is_accepted=1), 2. Kürzeste Anfahrt, 3. Höchste Marge
+                    $isBetter = false;
+
+                    if ($bestCandidate === null) {
+                        $isBetter = true;
+                    } else {
+                        $candIsAccepted = (int)$op['is_accepted'];
+                        $bestIsAccepted = (int)$bestCandidate['order']['is_accepted'];
+
+                        if ($candIsAccepted > $bestIsAccepted) {
+                            // Lageraufträge (1) haben absolute Priorität vor Börsenaufträgen (0)
+                            $isBetter = true;
+                        } elseif ($candIsAccepted === $bestIsAccepted) {
+                            // Bei gleichem Auftrags-Status entscheidet die Anfahrtsdistanz
+                            if ($emptyRunDist < $bestCandidate['empty_run_dist']) {
+                                $isBetter = true;
+                            } elseif ($emptyRunDist === $bestCandidate['empty_run_dist']) {
+                                // Bei gleicher Anfahrt entscheidet die Marge (€/km)
+                                if ($profitability > $bestCandidate['profitability']) {
+                                    $isBetter = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if ($isBetter) {
                         $bestCandidate = [
                             'pool_index' => $index,
                             'order' => $op,
@@ -280,7 +310,6 @@ class TopologyEngine
 
                 $loadedWeight = self::calculateLoadedWeight((int)$orderToLoad['weight_remaining'], (int)$t['capacity_t']);
                 $isSplit = self::isSplitLoad($loadedWeight, (int)$orderToLoad['weight_remaining']);
-                $availableWeight = (int)$orderToLoad['weight_remaining'];
 
                 $orderToLoad['weight_remaining'] -= $loadedWeight;
 
@@ -288,13 +317,19 @@ class TopologyEngine
                     ? 'warehouse' 
                     : ((empty($orderToLoad['ingame_order_id']) && (int)$orderToLoad['weight_remaining'] < (int)$orderToLoad['weight_total']) ? 'partially_planned' : 'market');
 
+                $assignedDriversInfo = '';
+                if ($suggestedStatus === 'partially_planned') {
+                    $assignedDriversInfo = $this->getAssignedDriversForOrder($orderToLoad['fingerprint']);
+                }
+
                 $suggestedChains[$truckId][] = [
                     'order' => $orderToLoad,
                     'loaded_weight' => $loadedWeight,
                     'available_weight' => (int)$orderToLoad['weight_remaining'],
                     'is_split' => $isSplit,
                     'empty_run_dist' => $bestCandidate['empty_run_dist'],
-                    'status' => $suggestedStatus
+                    'status' => $suggestedStatus,
+                    'assigned_drivers_info' => $assignedDriversInfo
                 ];
 
                 $virtualEndpoints[$truckId] = $orderToLoad['to_city_id'];
@@ -303,7 +338,13 @@ class TopologyEngine
                     $marketOrdersCount++;
                 }
             } else {
-                break;
+                // Wenn in der aktuellen Ziel-Kettenlänge kein LKW mehr bedient werden kann,
+                // erhöhen wir die Ziel-Länge schrittweise bis max 6.
+                if ($targetChainLength < 6) {
+                    $targetChainLength++;
+                } else {
+                    $hasMoreProposals = false;
+                }
             }
         }
 
@@ -681,8 +722,8 @@ class TopologyEngine
         $truckStmt->execute([$truckId]);
         $truck = $truckStmt->fetch(PDO::FETCH_ASSOC);
 
-        // Sicherheits-Check: Falls LKW nicht existiert oder nicht aktiv geschaltet ist, sofort abbrechen!
-        if (!$truck || (int)$truck['is_active_planning'] === 0) {
+        // Sicherheits-Check: Falls LKW nicht existiert, sofort abbrechen!
+        if (!$truck) {
             return [];
         }
 
@@ -919,5 +960,40 @@ class TopologyEngine
             'type' => $neighborUsed ? 2 : 1,
             'label' => ($depth > 0 ? ($depth . '+') : '0') . ' Aufträge' . $labelSuffix
         ];
+    }
+
+    /**
+     * Ermittelt eine formatierte Liste der Fahrer mit Fahrzeugtyp & Tonnage, die bereits einen Teil dieses Börsenauftrags verplant haben.
+     */
+    private function getAssignedDriversForOrder(string $fingerprint): string
+    {
+        if ($fingerprint === '') {
+            return '';
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT DISTINCT d.first_name, d.last_name, t.capacity_t, t.vehicle_type
+            FROM orders o
+            JOIN trucks t ON o.assigned_truck_id = t.id
+            LEFT JOIN drivers d ON t.assigned_driver_id = d.ingame_driver_id
+            WHERE o.fingerprint = ?
+              AND o.is_archived = 0
+              AND o.assigned_truck_id IS NOT NULL
+        ");
+        $stmt->execute([$fingerprint]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($rows)) {
+            return '';
+        }
+
+        $driverNames = [];
+        foreach ($rows as $r) {
+            $name = !empty($r['last_name']) ? ($r['last_name'] . ', ' . mb_substr($r['first_name'] ?? '', 0, 1) . '.') : 'Unbesetzt';
+            $truckInfo = $r['capacity_t'] . 't ' . $r['vehicle_type'];
+            $driverNames[] = $name . ' (' . $truckInfo . ')';
+        }
+
+        return implode(', ', $driverNames);
     }
 }
